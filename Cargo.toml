@@ -1,0 +1,13 @@
+[workspace]
+members = [
+    "crates/app", "crates/config",
+    "crates/controller", "crates/db",
+    "crates/model",
+    "crates/view",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+version = "0.1.0"
