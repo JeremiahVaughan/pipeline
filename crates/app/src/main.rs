@@ -1,3 +1,4 @@
+use config::{get_config, load_config};
 use controller::UserController;
 use db::initialize_sqlite;
 use model::SqliteUserModel;
@@ -7,7 +8,10 @@ use std::sync::{Arc, Mutex};
 use view::render_user_profile;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let connection = initialize_sqlite(Path::new("data/app.db"))?;
+    load_config("config/example.toml")?;
+    let cfg = get_config()?;
+
+    let connection = initialize_sqlite(Path::new(&cfg.database_path))?;
     let model = SqliteUserModel::new(Arc::new(Mutex::new(connection)));
     let controller = UserController::new(model);
 

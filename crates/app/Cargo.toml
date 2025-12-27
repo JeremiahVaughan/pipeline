@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+config = { path = "../config" }
 controller = { path = "../controller" }
 db = { path = "../db" }
 model = { path = "../model" }
