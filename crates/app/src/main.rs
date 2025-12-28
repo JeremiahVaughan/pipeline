@@ -269,13 +269,10 @@ fn handle_app_message(websocket: &mut WebSocket<TcpStream>, msg: Message) {
     } else {
         let response = format!("deploying {}", message);
         let result = websocket.send(Message::Text(response.into()));
-        match result {
-            Ok(()) => (),
-            Err(err) => {
-                let bt = Backtrace::capture();
-                eprintln!("error, when writing to websocket connection. Error: {}. Stack: {:?}", err, bt);
-                return
-            }
+        if let Err(err) = result {
+            let bt = Backtrace::capture();
+            eprintln!("error, when writing to websocket connection. Error: {}. Stack: {:?}", err, bt);
+            return
         }
         let rx = start_deploy();
         let mut got = 0;
