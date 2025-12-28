@@ -16,6 +16,7 @@ use config::get_config;
 #[derive(Debug)]
 pub enum DbInitError {
     Io(std::io::Error),
+    IoWithPath { path: PathBuf, source: std::io::Error },
     Sqlite(rusqlite::Error),
     Pool(r2d2::Error),
 }
@@ -24,6 +25,9 @@ impl Display for DbInitError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(err) => write!(f, "I/O error: {err}"),
+            Self::IoWithPath { path, source } => {
+                write!(f, "I/O error at {path:?}: {source}")
+            }
             Self::Sqlite(err) => write!(f, "SQLite error: {err}"),
             Self::Pool(err) => write!(f, "SQLite pool error: {err}"),
         }
@@ -66,7 +70,7 @@ pub fn pool() -> &'static DbPool {
         let mut connection = Connection::open(db_path)
             .unwrap_or_else(|e| panic!("error, when opening db connection. Error: {e}"));
         set_pragmas(&mut connection);
-        apply_migrations(&mut connection, db_path)
+        apply_migrations(&mut connection)
             .unwrap_or_else(|e| panic!("error, when applying migrations. Error: {e}"));
 
         let manager = SqliteConnectionManager::file(db_path).with_init(|conn| {
@@ -88,13 +92,18 @@ fn set_pragmas(connection: &mut Connection) {
         .unwrap_or_else(|e| panic!("error, when setting journal mode pragma. Error: {e}"));
 }
 
-fn apply_migrations(connection: &mut Connection, migrations_dir: &Path) -> Result<(), DbInitError> {
+fn apply_migrations(connection: &mut Connection) -> Result<(), DbInitError> {
     connection.execute(
         "CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY);",
         [],
     )?;
 
-    let mut migrations: Vec<PathBuf> = fs::read_dir(migrations_dir)?
+    let migrations_dir = Path::new(&get_config().migrations_dir);
+    let mut migrations: Vec<PathBuf> = fs::read_dir(&migrations_dir)
+        .map_err(|err| DbInitError::IoWithPath {
+            path: migrations_dir.to_path_buf(),
+            source: err,
+        })?
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| path.extension().is_some_and(|ext| ext == "sql"))
