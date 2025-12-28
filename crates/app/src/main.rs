@@ -148,6 +148,10 @@ fn handle_http_connection(mut stream: TcpStream) {
     }
 }
 
+const SOCKET: Token = Token(0);
+const STDOUT: Token = Token(2);
+const STDERR: Token = Token(3);
+
 fn handle_websocket_connection(stream: TcpStream) {
     let websocket = accept(stream);
     let mut websocket = match websocket {
@@ -180,9 +184,6 @@ fn handle_websocket_connection(stream: TcpStream) {
         }
     };
     let mut events = Events::with_capacity(64);
-    const SOCKET: Token = Token(0);
-    const STDOUT: Token = Token(2);
-    const STDERR: Token = Token(3);
 
     let raw_fd = websocket.get_ref().as_raw_fd();
     let mut socket_source = SourceFd(&raw_fd);
@@ -382,7 +383,7 @@ fn update_socket_interest(poll: &mut Poll, socket_source: &mut SourceFd, want_wr
     } else {
         Interest::READABLE
     };
-    if let Err(err) = poll.registry().reregister(socket_source, Token(0), interest) {
+    if let Err(err) = poll.registry().reregister(socket_source, SOCKET, interest) {
         let bt = Backtrace::capture();
         eprintln!("error, when updating websocket socket interest. Error: {}. Stack: {:?}", err, bt);
         return Err(())
@@ -494,13 +495,13 @@ fn spawn_deploy() -> Result<DeployChild, std::io::Error> {
 
 fn register_child_fds(poll: &mut Poll, deploy: &mut DeployChild) -> Result<(), ()> {
     let mut stdout_source = SourceFd(&deploy.stdout_fd);
-    if let Err(err) = poll.registry().register(&mut stdout_source, Token(2), Interest::READABLE) {
+    if let Err(err) = poll.registry().register(&mut stdout_source, STDOUT, Interest::READABLE) {
         let bt = Backtrace::capture();
         eprintln!("error, when registering deploy stdout. Error: {}. Stack: {:?}", err, bt);
         return Err(())
     }
     let mut stderr_source = SourceFd(&deploy.stderr_fd);
-    if let Err(err) = poll.registry().register(&mut stderr_source, Token(3), Interest::READABLE) {
+    if let Err(err) = poll.registry().register(&mut stderr_source, STDERR, Interest::READABLE) {
         let bt = Backtrace::capture();
         eprintln!("error, when registering deploy stderr. Error: {}. Stack: {:?}", err, bt);
         return Err(())
