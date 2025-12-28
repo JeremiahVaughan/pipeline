@@ -2,6 +2,7 @@ use hypertext::{ Raw, maud, prelude::* };
 use config::Service;
 
 static WEBSOCKET_CLIENT: &str = include_str!("../../../static/ws.js"); 
+static HOME_CSS: &str = include_str!("../../../static/home.css"); 
 
 pub fn get_home(services: &[Service]) -> Vec<u8> {
     maud! {
@@ -10,10 +11,14 @@ pub fn get_home(services: &[Service]) -> Vec<u8> {
                 meta charset="utf-8";
                 title { "Hello!" }
                 script type="module" src="/static/custom_htmx.js" defer {}
+                style {
+                    (Raw::dangerously_create(HOME_CSS))
+                }
             }
             body {
                 h1 { "Hello!" }
                 p { "Me rust!" }
+                img src="/static/firetruck.svg" loading="lazy" alt="firetruck" width="96" height="96";
                 form #publish-form {
                     label {
                         "Message:"

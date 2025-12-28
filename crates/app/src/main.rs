@@ -22,6 +22,7 @@ use tungstenite::{accept, Message, Bytes, WebSocket};
 // importing like this is nice because all files end up in the binary and stay in RAM for quick
 // access. Also means you just ship the binary instead of files.
 static CUSTOM_HTMX_JS: &[u8] = include_bytes!("../../../static/custom_htmx.js"); 
+static FIRE_TRUCK_SVG: &[u8] = include_bytes!("../../../static/firetruck.svg"); 
 // static WASM_HELLO: &[u8] = include_bytes!("../wasm-hello/pkg/wasm_hello.js");
 // static WASM_HELLO_RUST: &[u8] = include_bytes!("../wasm-hello/pkg/wasm_hello_bg.wasm");
 
@@ -98,6 +99,12 @@ fn handle_http_connection(mut stream: TcpStream) {
             "HTTP/1.1 200 OK",
             CUSTOM_HTMX_JS,
             "application/javascript; charset=utf-8",
+            true,
+        ),
+        "GET /static/firetruck.svg HTTP/1.1" => (
+            "HTTP/1.1 200 OK",
+            FIRE_TRUCK_SVG,
+            "image/svg+xml",
             true,
         ),
         // "GET /static/wasm_hello.js HTTP/1.1" => (
