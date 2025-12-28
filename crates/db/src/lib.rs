@@ -78,8 +78,10 @@ pub fn pool() -> &'static DbPool {
             Ok(())
         });
 
+        let max_users = u32::try_from(get_config().max_users)
+            .expect("max_users should fit into u32 for the connection pool");
         Pool::builder()
-            .max_size(get_config().max_users)
+            .max_size(max_users)
             .build(manager)
             .unwrap_or_else(|e| panic!("error, when creating db connection pool. Error: {e}"))
     })

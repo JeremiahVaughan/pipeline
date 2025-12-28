@@ -15,7 +15,7 @@ static CONFIG: OnceLock<AppConfig> = OnceLock::new();
 pub struct AppConfig {
     pub database_path: String,
     pub migrations_dir: String,
-    pub max_users: u32,
+    pub max_users: usize,
 }
 
 /// Load configuration from a TOML file and initialize the global config.

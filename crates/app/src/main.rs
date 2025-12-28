@@ -24,15 +24,13 @@ static CUSTOM_HTMX_JS: &[u8] = include_bytes!("../../../static/custom_htmx.js");
 
 static WATCHER_POOL: OnceLock<ThreadPool> = OnceLock::new();
 fn get_watcher_pool() -> &'static ThreadPool {
-    let max_users = usize::try_from(get_config().max_users)
-        .expect("max_users should fit into usize");
+    let max_users = get_config().max_users;
     WATCHER_POOL.get_or_init(|| ThreadPool::new(max_users * 2)) // each user will need two threads one
 }
 
 static DEPLOYMENT_POOL: OnceLock<ThreadPool> = OnceLock::new();
 fn get_deployment_pool() -> &'static ThreadPool {
-    let max_users = usize::try_from(get_config().max_users)
-        .expect("max_users should fit into usize");
+    let max_users = get_config().max_users;
     DEPLOYMENT_POOL.get_or_init(|| ThreadPool::new(max_users)) 
 }
 
@@ -56,8 +54,7 @@ fn main() {
     // websocket threads
     thread::spawn(move || {
         let listener = TcpListener::bind("127.0.0.1:8787").unwrap();
-        let max_users = usize::try_from(get_config().max_users)
-            .expect("max_users should fit into usize");
+        let max_users = get_config().max_users;
         let pool = ThreadPool::new(max_users); 
         for stream in listener.incoming() {
             match stream {
