@@ -87,7 +87,7 @@ impl SqliteUserModel {
 
     /// Insert a new user and return the created record.
     pub fn create_user(&self, username: &str, email: &str) -> ModelResult<User> {
-        let conn = db::pool();
+        let conn = db::pool().get()?;
         conn.execute(
             "INSERT INTO users (username, email) VALUES (:username, :email) \
              ON CONFLICT(username) DO NOTHING;",
@@ -108,7 +108,7 @@ impl SqliteUserModel {
 
     /// Fetch a user by id.
     pub fn find_user(&self, id: u64) -> ModelResult<Option<User>> {
-        let conn = db::pool();
+        let conn = db::pool().get()?;
         conn.prepare_cached("SELECT id, username, email FROM users WHERE id = ?1;")?
             .query_row([id], |row| {
                 Ok(User::new(
@@ -118,11 +118,12 @@ impl SqliteUserModel {
                 ))
             })
             .optional()
+            .map_err(Into::into)
     }
 
     /// Fetch a user by username.
     pub fn find_user_by_username(&self, username: &str) -> ModelResult<Option<User>> {
-        let conn = db::pool();
+        let conn = db::pool().get()?;
         conn.prepare_cached("SELECT id, username, email FROM users WHERE username = ?1;")?
             .query_row([username], |row| {
                 Ok(User::new(
@@ -132,6 +133,7 @@ impl SqliteUserModel {
                 ))
             })
             .optional()
+            .map_err(Into::into)
     }
 }
 
