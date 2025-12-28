@@ -5,15 +5,15 @@ use app::{ThreadPool, get_home, get_not_found};
 use config::get_config;
 use std::{
     thread,
-    process::{Command, Stdio},
+    process::{Child, ChildStderr, ChildStdout, Command, Stdio},
     time::{Instant, Duration},
     backtrace::Backtrace,
+    collections::VecDeque,
     io::{self, BufReader, prelude::*, ErrorKind},
     net::{TcpListener, TcpStream},
-    os::unix::io::AsRawFd,
-    sync::{Arc, OnceLock, mpsc},
+    os::unix::io::{AsRawFd, RawFd},
 };
-use mio::{Events, Interest, Poll, Token, Waker};
+use mio::{Events, Interest, Poll, Token};
 use mio::unix::SourceFd;
 use rand; 
 use tungstenite::{accept, Message, Bytes, WebSocket};
@@ -24,23 +24,6 @@ use tungstenite::{accept, Message, Bytes, WebSocket};
 static CUSTOM_HTMX_JS: &[u8] = include_bytes!("../../../static/custom_htmx.js"); 
 // static WASM_HELLO: &[u8] = include_bytes!("../wasm-hello/pkg/wasm_hello.js");
 // static WASM_HELLO_RUST: &[u8] = include_bytes!("../wasm-hello/pkg/wasm_hello_bg.wasm");
-
-static WATCHER_POOL: OnceLock<ThreadPool> = OnceLock::new();
-fn get_watcher_pool() -> &'static ThreadPool {
-    WATCHER_POOL.get_or_init(|| {
-        let max_users = get_config().max_users;
-        ThreadPool::new(max_users * 2)
-    }) // each user will need two threads one
-}
-
-static DEPLOYMENT_POOL: OnceLock<ThreadPool> = OnceLock::new();
-fn get_deployment_pool() -> &'static ThreadPool {
-    DEPLOYMENT_POOL.get_or_init(|| {
-        let max_users = get_config().max_users;
-        ThreadPool::new(max_users)
-    }) 
-}
-
 
 fn main() {
     let _ = db::pool();
@@ -54,9 +37,6 @@ fn main() {
         Some(user) => println!("{}", render_user_profile(&user)),
         None => eprintln!("User not found"),
     };
-
-    let _ = get_watcher_pool();
-    // watcher threads for watching child process stderr and stdout
 
     // websocket threads
     thread::spawn(move || {
@@ -201,24 +181,24 @@ fn handle_websocket_connection(stream: TcpStream) {
     };
     let mut events = Events::with_capacity(64);
     const SOCKET: Token = Token(0);
-    const WAKE: Token = Token(1);
+    const STDOUT: Token = Token(2);
+    const STDERR: Token = Token(3);
 
     let raw_fd = websocket.get_ref().as_raw_fd();
     let mut socket_source = SourceFd(&raw_fd);
-    if let Err(err) = poll.registry().register(&mut socket_source, SOCKET, Interest::READABLE) {
+    if let Err(err) = poll.registry().register(
+            &mut socket_source,
+            SOCKET,
+            Interest::READABLE,
+        ) {
         let bt = Backtrace::capture();
         eprintln!("error, when registering websocket socket with poll. Error: {}. Stack: {:?}", err, bt);
         return
     }
-    let waker = match Waker::new(poll.registry(), WAKE) {
-        Ok(w) => Arc::new(w),
-        Err(err) => {
-            let bt = Backtrace::capture();
-            eprintln!("error, when registering websocket waker. Error: {}. Stack: {:?}", err, bt);
-            return
-        }
-    };
-    let (out_tx, out_rx) = mpsc::channel::<Message>();
+
+    let mut outbox: VecDeque<Message> = VecDeque::new();
+    let mut deploy: Option<DeployChild> = None;
+    let mut want_write = false;
 
     loop {
         let now = Instant::now();
@@ -240,67 +220,106 @@ fn handle_websocket_connection(stream: TcpStream) {
         for event in events.iter() {
             match event.token() {
                 SOCKET => {
-                    loop {
-                        match websocket.read() {
-                            Ok(msg) => {
-                                // Any inbound traffic counts as “alive”
-                                last_rx = Instant::now();
-                                ping_in_flight = None;
-                                match msg {
-                                    Message::Ping(_) => {
-                                        // tungstenite will auto-reply to ping/pongs but we still list them in this
-                                        // match statement so application logic handling doesn't get handed control
-                                        // logic messages
-                                    }
-                                    Message::Pong(_) => {
-                                        // good, client is alive, but we already cleared ping_in_flight because any
-                                        // traffic counts as proof of life
-                                    }
-                                    Message::Close(frame) => {
-                                        websocket.send(Message::Close(frame))
-                                            .unwrap_or_else(|e| eprintln!("error, when sending close response in response to close request. Error: {}", e));
-                                        return
-                                    }
-                                    other => {
-                                        handle_app_message(&out_tx, &waker, other);
+                    if event.is_readable() {
+                        loop {
+                            match websocket.read() {
+                                Ok(msg) => {
+                                    // Any inbound traffic counts as "alive"
+                                    last_rx = Instant::now();
+                                    ping_in_flight = None;
+                                    match msg {
+                                        Message::Ping(_) => {
+                                            // tungstenite will auto-reply to ping/pongs but we still list them in this
+                                            // match statement so application logic handling doesn't get handed control
+                                            // logic messages
+                                        }
+                                        Message::Pong(_) => {
+                                            // good, client is alive, but we already cleared ping_in_flight because any
+                                            // traffic counts as proof of life
+                                        }
+                                        Message::Close(frame) => {
+                                            websocket.send(Message::Close(frame))
+                                                .unwrap_or_else(|e| eprintln!("error, when sending close response in response to close request. Error: {}", e));
+                                            return
+                                        }
+                                        other => {
+                                            handle_app_message(
+                                                &mut poll,
+                                                &mut outbox,
+                                                &mut deploy,
+                                                &mut socket_source,
+                                                other,
+                                                &mut want_write,
+                                            );
+                                        }
                                     }
                                 }
-                            }
-                            Err(e) if is_timeout(&e) => break,
-                            Err(err) => {
-                                let bt = Backtrace::capture();
-                                eprintln!("error, when reading websocket message. Error: {}. Stack: {:?}", err, bt);
-                                return
+                                Err(e) if is_timeout(&e) => break,
+                                Err(err) => {
+                                    let bt = Backtrace::capture();
+                                    eprintln!("error, when reading websocket message. Error: {}. Stack: {:?}", err, bt);
+                                    return
+                                }
                             }
                         }
                     }
+                    if event.is_writable() {
+                        if drain_outbound(&mut outbox, &mut websocket, &mut ping_in_flight).is_err() {
+                            return
+                        }
+                    }
                 }
-                WAKE => {
-                    if drain_outbound(&out_rx, &mut websocket).is_err() {
-                        return
+                STDOUT => {
+                    if let Some(dep) = deploy.as_mut() {
+                        if handle_child_readable(dep, &mut outbox, ChildStream::Stdout).is_err() {
+                            return
+                        }
+                    }
+                }
+                STDERR => {
+                    if let Some(dep) = deploy.as_mut() {
+                        if handle_child_readable(dep, &mut outbox, ChildStream::Stderr).is_err() {
+                            return
+                        }
                     }
                 }
                 _ => {}
             }
         }
 
-        if drain_outbound(&out_rx, &mut websocket).is_err() {
+        if drain_outbound(&mut outbox, &mut websocket, &mut ping_in_flight).is_err() {
             return
+        }
+
+        let write_work_needed = !outbox.is_empty();
+        if want_write != write_work_needed {
+            want_write = write_work_needed;
+            if update_socket_interest(&mut poll, &mut socket_source, want_write).is_err() {
+                return
+            }
+        }
+
+        if let Some(dep) = deploy.as_mut() {
+            if finalize_deploy(&mut poll, dep, &mut outbox).is_err() {
+                return
+            }
+            if dep.is_done() {
+                deploy = None;
+            }
         }
 
         let now = Instant::now();
 
         // 1) If we've been idle long enough, ping.
         if now.duration_since(last_rx) >= ping_interval && ping_in_flight.is_none() {
-            let result = websocket.send(Message::Ping(Bytes::new()));
-            match result {
-                Ok(()) => (),
+            match websocket.send(Message::Ping(Bytes::new())) {
+                Ok(()) => ping_in_flight = Some(now),
+                Err(err) if is_timeout(&err) => outbox.push_back(Message::Ping(Bytes::new())),
                 Err(err) => {
                     eprintln!("error, when writing ping websocket message. Error: {}", err);
                     return
                 }
             }
-            ping_in_flight = Some(now);
         }
 
         // 2) If we pinged and still didn't get anything back in time, close.
@@ -316,60 +335,85 @@ fn handle_websocket_connection(stream: TcpStream) {
 
 
 
-fn handle_app_message(out_tx: &mpsc::Sender<Message>, waker: &Arc<Waker>, msg: Message) {
+fn handle_app_message(
+    poll: &mut Poll,
+    outbox: &mut VecDeque<Message>,
+    deploy: &mut Option<DeployChild>,
+    socket_source: &mut SourceFd,
+    msg: Message,
+    want_write: &mut bool,
+) {
     // custom ping / pong started by client since the client doesn't know when it can reconnect due to no
     // access to control frames
     let message = msg.to_string();
     if message == "ping" {
-        queue_outbound(out_tx, waker, Message::Text("pong".into()));
+        outbox.push_back(Message::Text("pong".into()));
     } else {
         let response = format!("deploying {}", message);
-        queue_outbound(out_tx, waker, Message::Text(response.into()));
-        let rx = start_deploy();
-        let out_tx = out_tx.clone();
-        let waker = Arc::clone(waker);
-        get_deployment_pool().execute(move || {
-            forward_deploy_events(rx, out_tx, waker);
-        });
-    }
-}
-
-fn queue_outbound(out_tx: &mpsc::Sender<Message>, waker: &Waker, msg: Message) {
-    if out_tx.send(msg).is_ok() {
-        let _ = waker.wake();
-    }
-}
-
-fn drain_outbound(out_rx: &mpsc::Receiver<Message>, websocket: &mut WebSocket<TcpStream>) -> Result<(), ()> {
-    while let Ok(msg) = out_rx.try_recv() {
-        if let Err(err) = websocket.send(msg) {
-            eprintln!("error, when writing to websocket connection. Error: {}", err);
-            return Err(())
+        outbox.push_back(Message::Text(response.into()));
+        if deploy.is_some() {
+            outbox.push_back(Message::Text("deploy already running".into()));
+            return
         }
+        match spawn_deploy() {
+            Ok(mut dep) => {
+                if register_child_fds(poll, &mut dep).is_err() {
+                    return
+                }
+                *deploy = Some(dep);
+            }
+            Err(err) => {
+                let msg = format!("deploy failed: {}", err);
+                eprintln!("error, when running deploy: {}", msg);
+                outbox.push_back(Message::Text(msg.into()));
+            }
+        }
+    }
+    let write_work_needed = !outbox.is_empty();
+    if *want_write != write_work_needed {
+        *want_write = write_work_needed;
+        let _ = update_socket_interest(poll, socket_source, *want_write);
+    }
+}
+
+fn update_socket_interest(poll: &mut Poll, socket_source: &mut SourceFd, want_write: bool) -> Result<(), ()> {
+    let interest = if want_write {
+        Interest::READABLE.add(Interest::WRITABLE)
+    } else {
+        Interest::READABLE
+    };
+    if let Err(err) = poll.registry().reregister(socket_source, Token(0), interest) {
+        let bt = Backtrace::capture();
+        eprintln!("error, when updating websocket socket interest. Error: {}. Stack: {:?}", err, bt);
+        return Err(())
     }
     Ok(())
 }
 
-fn forward_deploy_events(rx: mpsc::Receiver<DeployEvent>, out_tx: mpsc::Sender<Message>, waker: Arc<Waker>) {
-    let mut got = 0;
-    loop {
-        match rx.recv() {
-            Ok(DeployEvent::Output(message)) => {
-                queue_outbound(&out_tx, &waker, Message::Text(message.into()));
-            }
-            Ok(DeployEvent::Done) => {
-                got += 1;
-                if got == 2 {
-                    break;
+fn drain_outbound(
+    outbox: &mut VecDeque<Message>,
+    websocket: &mut WebSocket<TcpStream>,
+    ping_in_flight: &mut Option<Instant>,
+) -> Result<(), ()> {
+    while let Some(msg) = outbox.pop_front() {
+        let is_ping = matches!(msg, Message::Ping(_));
+        match websocket.send(msg.clone()) {
+            Ok(()) => {
+                if is_ping && ping_in_flight.is_none() {
+                    *ping_in_flight = Some(Instant::now());
                 }
             }
-            Ok(DeployEvent::Error(message)) => {
-                queue_outbound(&out_tx, &waker, Message::Text(message.into()));
-                break;
+            Err(err) if is_timeout(&err) => {
+                outbox.push_front(msg);
+                return Ok(())
             }
-            Err(_) => break, // all senders dropped
+            Err(err) => {
+                eprintln!("error, when writing to websocket connection. Error: {}", err);
+                return Err(())
+            }
         }
     }
+    Ok(())
 }
 
 fn is_timeout(e: &tungstenite::Error) -> bool {
@@ -383,26 +427,30 @@ fn is_timeout(e: &tungstenite::Error) -> bool {
     }
 }
 
-enum DeployEvent {
-    Output(String),
-    Done,
-    Error(String),
+enum ChildStream {
+    Stdout,
+    Stderr,
 }
 
-fn start_deploy() -> mpsc::Receiver<DeployEvent> {
-    let (tx, rx) = mpsc::channel::<DeployEvent>();
-    let tx_error = tx.clone();
-    get_deployment_pool().execute(move || {
-        if let Err(err) = run_deploy(tx) {
-            let msg = format!("deploy failed: {}", err);
-            eprintln!("error, when running deploy: {}", msg);
-            let _ = tx_error.send(DeployEvent::Error(msg));
-        }
-    });
-    rx
+struct DeployChild {
+    child: Child,
+    stdout: ChildStdout,
+    stderr: ChildStderr,
+    stdout_buf: Vec<u8>,
+    stderr_buf: Vec<u8>,
+    stdout_done: bool,
+    stderr_done: bool,
+    stdout_fd: RawFd,
+    stderr_fd: RawFd,
 }
 
-fn run_deploy(tx: mpsc::Sender<DeployEvent>) -> Result<(), std::io::Error> {
+impl DeployChild {
+    fn is_done(&self) -> bool {
+        self.stdout_done && self.stderr_done
+    }
+}
+
+fn spawn_deploy() -> Result<DeployChild, std::io::Error> {
     let mut child = Command::new("ls")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -426,50 +474,136 @@ fn run_deploy(tx: mpsc::Sender<DeployEvent>) -> Result<(), std::io::Error> {
         )
     })?;
 
-    {
-        let tx = tx.clone();
-        WATCHER_POOL.get().expect("watcher pool did not init").execute(move || {
-            let reader = BufReader::new(stdout);
-            for line_res in reader.lines() {
-                let line = match line_res {
-                    Ok(l) => l,
-                    Err(e) => {
-                        eprintln!("error, when reading watcher pool lines for stdout: {}", e);
-                        break;
-                    }
-                };
-                // safe to ignore here because error would just mean the receiver is already dropped
-                let _ = tx.send(DeployEvent::Output(line.to_string()));
-            }
-            // safe to ignore here because error would just mean the receiver is already dropped
-            let _ = tx.send(DeployEvent::Done);
-        });
+    let stdout_fd = stdout.as_raw_fd();
+    let stderr_fd = stderr.as_raw_fd();
+    set_nonblocking_fd(stdout_fd)?;
+    set_nonblocking_fd(stderr_fd)?;
+
+    Ok(DeployChild {
+        child,
+        stdout,
+        stderr,
+        stdout_buf: Vec::new(),
+        stderr_buf: Vec::new(),
+        stdout_done: false,
+        stderr_done: false,
+        stdout_fd,
+        stderr_fd,
+    })
+}
+
+fn register_child_fds(poll: &mut Poll, deploy: &mut DeployChild) -> Result<(), ()> {
+    let mut stdout_source = SourceFd(&deploy.stdout_fd);
+    if let Err(err) = poll.registry().register(&mut stdout_source, Token(2), Interest::READABLE) {
+        let bt = Backtrace::capture();
+        eprintln!("error, when registering deploy stdout. Error: {}. Stack: {:?}", err, bt);
+        return Err(())
     }
-    {
-        let tx = tx.clone();
-        WATCHER_POOL.get().expect("watcher pool did not init").execute(move || {
-            let reader = BufReader::new(stderr);
-            for line_res in reader.lines() {
-                let line = match line_res {
-                    Ok(l) => l,
-                    Err(e) => {
-                        eprintln!("error, when reading watcher pool lines for stderr: {}", e);
-                        break;
-                    }
-                };
-                // safe to ignore here because error would just mean the receiver is already dropped
-                let _ = tx.send(DeployEvent::Output(line.to_string()));
-            }
-            // safe to ignore here because error would just mean the receiver is already dropped
-            let _ = tx.send(DeployEvent::Done);
-        });
+    let mut stderr_source = SourceFd(&deploy.stderr_fd);
+    if let Err(err) = poll.registry().register(&mut stderr_source, Token(3), Interest::READABLE) {
+        let bt = Backtrace::capture();
+        eprintln!("error, when registering deploy stderr. Error: {}. Stack: {:?}", err, bt);
+        return Err(())
     }
-    let status = child.wait().map_err(|e| {
-        io::Error::new(
-            e.kind(),
-            format!("error, when waiting for child process. Error: {}", e),
-        )
-    })?;
-    println!("child process exited: {status}");
+    Ok(())
+}
+
+fn handle_child_readable(deploy: &mut DeployChild, outbox: &mut VecDeque<Message>, which: ChildStream) -> Result<(), ()> {
+    match which {
+        ChildStream::Stdout => {
+            match read_child_stream(&mut deploy.stdout, &mut deploy.stdout_buf, outbox) {
+                Ok(ChildRead::Progress) => Ok(()),
+                Ok(ChildRead::Eof) => {
+                    deploy.stdout_done = true;
+                    Ok(())
+                }
+                Err(err) => {
+                    eprintln!("error, when reading deploy output: {}", err);
+                    Err(())
+                }
+            }
+        }
+        ChildStream::Stderr => {
+            match read_child_stream(&mut deploy.stderr, &mut deploy.stderr_buf, outbox) {
+                Ok(ChildRead::Progress) => Ok(()),
+                Ok(ChildRead::Eof) => {
+                    deploy.stderr_done = true;
+                    Ok(())
+                }
+                Err(err) => {
+                    eprintln!("error, when reading deploy output: {}", err);
+                    Err(())
+                }
+            }
+        }
+    }
+}
+
+fn finalize_deploy(poll: &mut Poll, deploy: &mut DeployChild, outbox: &mut VecDeque<Message>) -> Result<(), ()> {
+    if deploy.is_done() {
+        let status = match deploy.child.try_wait() {
+            Ok(Some(status)) => status,
+            Ok(None) => return Ok(()),
+            Err(err) => {
+                eprintln!("error, when waiting for child process. Error: {}", err);
+                return Err(())
+            }
+        };
+                outbox.push_back(Message::Text(format!("child process exited: {status}").into()));
+        let mut stdout_source = SourceFd(&deploy.stdout_fd);
+        let _ = poll.registry().deregister(&mut stdout_source);
+        let mut stderr_source = SourceFd(&deploy.stderr_fd);
+        let _ = poll.registry().deregister(&mut stderr_source);
+    }
+    Ok(())
+}
+
+enum ChildRead {
+    Progress,
+    Eof,
+}
+
+fn read_child_stream(stream: &mut impl Read, buf: &mut Vec<u8>, outbox: &mut VecDeque<Message>) -> io::Result<ChildRead> {
+    let mut tmp = [0u8; 4096];
+    loop {
+        match stream.read(&mut tmp) {
+            Ok(0) => {
+                flush_lines(buf, outbox);
+                return Ok(ChildRead::Eof);
+            }
+            Ok(n) => {
+                buf.extend_from_slice(&tmp[..n]);
+                flush_lines(buf, outbox);
+            }
+            Err(e) if e.kind() == ErrorKind::WouldBlock => return Ok(ChildRead::Progress),
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+fn flush_lines(buf: &mut Vec<u8>, outbox: &mut VecDeque<Message>) {
+    while let Some(pos) = buf.iter().position(|b| *b == b'\n') {
+        let mut line = buf.drain(..=pos).collect::<Vec<u8>>();
+        if matches!(line.last(), Some(b'\n')) {
+            line.pop();
+        }
+        if matches!(line.last(), Some(b'\r')) {
+            line.pop();
+        }
+        let text = String::from_utf8_lossy(&line).to_string();
+        outbox.push_back(Message::Text(text.into()));
+    }
+}
+
+fn set_nonblocking_fd(fd: RawFd) -> io::Result<()> {
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let new_flags = flags | libc::O_NONBLOCK;
+    let res = unsafe { libc::fcntl(fd, libc::F_SETFL, new_flags) };
+    if res < 0 {
+        return Err(io::Error::last_os_error());
+    }
     Ok(())
 }

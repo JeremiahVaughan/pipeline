@@ -21,6 +21,7 @@ dependencies = [
  "config",
  "controller",
  "db",
+ "libc",
  "mio",
  "model",
  "rand",
