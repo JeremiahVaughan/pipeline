@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 model = { path = "../model" }
+hypertext = "0.12.1"
