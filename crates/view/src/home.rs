@@ -147,24 +147,24 @@ pub fn get_home() -> Vec<u8> {
                         })();
                     "##))
                 }
-                script type="module" {
-                    r#"
-                    import init, { add, greet } from "/static/wasm_hello.js";
+                // script type="module" {
+                //     r#"
+                //     import init, { add, greet } from "/static/wasm_hello.js";
 
-                    async function main() {
-                        // Loads and initializes the .wasm
-                        await init("/static/wasm_hello_bg.wasm");
+                //     async function main() {
+                //         // Loads and initializes the .wasm
+                //         await init("/static/wasm_hello_bg.wasm");
 
-                        const out = document.getElementById("out");
-                        out.textContent =
-                            `add(2, 3) = ${add(2, 3)}\n` +
-                            `${greet("human")}\n`;
-                    }
+                //         const out = document.getElementById("out");
+                //         out.textContent =
+                //             `add(2, 3) = ${add(2, 3)}\n` +
+                //             `${greet("human")}\n`;
+                //     }
 
-                    main();
+                //     main();
 
-                    "#
-                }
+                //     "#
+                // }
             }
         }
     }.render().into_inner().as_bytes().to_vec()

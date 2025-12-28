@@ -1,7 +1,4 @@
-pub mod home;
-pub use home::get_home;
-pub mod not_found;
-pub use not_found::get_not_found;
+pub use view::{get_home, get_not_found};
 
 use std::{
     sync::{Arc, Mutex, mpsc},
@@ -96,4 +93,3 @@ impl Worker {
         Worker { id, thread }
     }
 }
-

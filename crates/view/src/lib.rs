@@ -1,5 +1,10 @@
 //! View helpers for rendering model data to text.
 
+pub mod home;
+pub use home::get_home;
+pub mod not_found;
+pub use not_found::get_not_found;
+
 use model::User;
 
 /// Render a user profile into a simple string representation.

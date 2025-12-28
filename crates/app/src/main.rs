@@ -18,18 +18,22 @@ use tungstenite::{accept, Message, Bytes, WebSocket};
 
 // importing like this is nice because all files end up in the binary and stay in RAM for quick
 // access. Also means you just ship the binary instead of files.
-static CUSTOM_HTMX_JS: &[u8] = include_bytes!("../static/custom_htmx.js"); 
-static WASM_HELLO: &[u8] = include_bytes!("../wasm-hello/pkg/wasm_hello.js");
-static WASM_HELLO_RUST: &[u8] = include_bytes!("../wasm-hello/pkg/wasm_hello_bg.wasm");
+static CUSTOM_HTMX_JS: &[u8] = include_bytes!("../../../static/custom_htmx.js"); 
+// static WASM_HELLO: &[u8] = include_bytes!("../wasm-hello/pkg/wasm_hello.js");
+// static WASM_HELLO_RUST: &[u8] = include_bytes!("../wasm-hello/pkg/wasm_hello_bg.wasm");
 
 static WATCHER_POOL: OnceLock<ThreadPool> = OnceLock::new();
-fn get_watcher_pool() -> ThreadPool {
-    WATCHER_POOL.get_or_init(|| ThreadPool::new(get_config().max_users * 2)) // each user will need two threads one
+fn get_watcher_pool() -> &'static ThreadPool {
+    let max_users = usize::try_from(get_config().max_users)
+        .expect("max_users should fit into usize");
+    WATCHER_POOL.get_or_init(|| ThreadPool::new(max_users * 2)) // each user will need two threads one
 }
 
 static DEPLOYMENT_POOL: OnceLock<ThreadPool> = OnceLock::new();
-fn get_deployment_pool() -> ThreadPool {
-    DEPLOYMENT_POOL.get_or_init(|| ThreadPool::new(get_config().max_users)) 
+fn get_deployment_pool() -> &'static ThreadPool {
+    let max_users = usize::try_from(get_config().max_users)
+        .expect("max_users should fit into usize");
+    DEPLOYMENT_POOL.get_or_init(|| ThreadPool::new(max_users)) 
 }
 
 
@@ -52,7 +56,9 @@ fn main() {
     // websocket threads
     thread::spawn(move || {
         let listener = TcpListener::bind("127.0.0.1:8787").unwrap();
-        let pool = ThreadPool::new(CONCURRENT_USERS_SUPPORTED); 
+        let max_users = usize::try_from(get_config().max_users)
+            .expect("max_users should fit into usize");
+        let pool = ThreadPool::new(max_users); 
         for stream in listener.incoming() {
             match stream {
                 Ok(s) => {
@@ -110,18 +116,18 @@ fn handle_http_connection(mut stream: TcpStream) {
             "application/javascript; charset=utf-8",
             true,
         ),
-        "GET /static/wasm_hello.js HTTP/1.1" => (
-            "HTTP/1.1 200 OK",
-            WASM_HELLO,
-            "application/javascript; charset=utf-8",
-            true,
-        ),
-        "GET /static/wasm_hello_bg.wasm HTTP/1.1" => (
-            "HTTP/1.1 200 OK",
-            WASM_HELLO_RUST,
-            "application/wasm",
-            true,
-        ),
+        // "GET /static/wasm_hello.js HTTP/1.1" => (
+        //     "HTTP/1.1 200 OK",
+        //     WASM_HELLO,
+        //     "application/javascript; charset=utf-8",
+        //     true,
+        // ),
+        // "GET /static/wasm_hello_bg.wasm HTTP/1.1" => (
+        //     "HTTP/1.1 200 OK",
+        //     WASM_HELLO_RUST,
+        //     "application/wasm",
+        //     true,
+        // ),
         _ => (
             "HTTP/1.1 404 NOT FOUND",
             &get_not_found(),
@@ -203,7 +209,7 @@ fn handle_websocket_connection(stream: TcpStream) {
                     }
                     Message::Close(frame) => {
                         websocket.send(Message::Close(frame))
-                            .unwrap_or_else(|e| eprintln!("error, when sending close response in response to close request. Error: {}", err));
+                            .unwrap_or_else(|e| eprintln!("error, when sending close response in response to close request. Error: {}", e));
                         break;
                     }
                     other => {
