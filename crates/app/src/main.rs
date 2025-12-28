@@ -90,7 +90,7 @@ fn handle_http_connection(mut stream: TcpStream) {
     let (status_line, contents, content_type, enable_cache): (&str, &[u8], &str, bool) = match &request_line[..] {
         "GET / HTTP/1.1" => (
             "HTTP/1.1 200 OK",
-            &get_home(),
+            &get_home(&get_config().services),
             "text/html; charset=utf-8",
             false,
         ),
@@ -301,10 +301,10 @@ fn handle_websocket_connection(stream: TcpStream) {
         }
 
         if let Some(dep) = deploy.as_mut() {
-            if finalize_deploy(&mut poll, dep, &mut outbox).is_err() {
-                return
-            }
             if dep.is_done() {
+                if finalize_deploy(&mut poll, dep, &mut outbox).is_err() {
+                    return
+                }
                 deploy = None;
             }
         }
@@ -541,21 +541,19 @@ fn handle_child_readable(deploy: &mut DeployChild, outbox: &mut VecDeque<Message
 }
 
 fn finalize_deploy(poll: &mut Poll, deploy: &mut DeployChild, outbox: &mut VecDeque<Message>) -> Result<(), ()> {
-    if deploy.is_done() {
-        let status = match deploy.child.try_wait() {
-            Ok(Some(status)) => status,
-            Ok(None) => return Ok(()),
-            Err(err) => {
-                eprintln!("error, when waiting for child process. Error: {}", err);
-                return Err(())
-            }
-        };
-                outbox.push_back(Message::Text(format!("child process exited: {status}").into()));
-        let mut stdout_source = SourceFd(&deploy.stdout_fd);
-        let _ = poll.registry().deregister(&mut stdout_source);
-        let mut stderr_source = SourceFd(&deploy.stderr_fd);
-        let _ = poll.registry().deregister(&mut stderr_source);
-    }
+    let status = match deploy.child.try_wait() {
+        Ok(Some(status)) => status,
+        Ok(None) => return Ok(()),
+        Err(err) => {
+            eprintln!("error, when waiting for child process. Error: {}", err);
+            return Err(())
+        }
+    };
+            outbox.push_back(Message::Text(format!("child process exited: {status}").into()));
+    let mut stdout_source = SourceFd(&deploy.stdout_fd);
+    let _ = poll.registry().deregister(&mut stdout_source);
+    let mut stderr_source = SourceFd(&deploy.stderr_fd);
+    let _ = poll.registry().deregister(&mut stderr_source);
     Ok(())
 }
 

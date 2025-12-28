@@ -16,6 +16,12 @@ pub struct AppConfig {
     pub database_path: String,
     pub migrations_dir: String,
     pub max_users: usize,
+    pub services: Vec<Service>,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+pub struct Service {
+    pub name: String,
 }
 
 /// Load configuration from a TOML file and initialize the global config.

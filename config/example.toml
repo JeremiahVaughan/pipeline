@@ -3,3 +3,11 @@
 database_path = "/data/pipeline.db"
 migrations_dir = "../crates/db/migrations"
 max_users = 20
+
+[[services]]
+name = "service1"
+
+[[services]]
+name = "service2"
+
+
