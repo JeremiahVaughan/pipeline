@@ -3,11 +3,43 @@
 //! SQL lives here so controllers remain thin and SQLite-specific concerns stay
 //! encapsulated in the model layer.
 
-use rusqlite::{Connection, OptionalExtension, named_params};
-use std::sync::{Arc, Mutex};
+use r2d2_sqlite::{rusqlite};
+use r2d2_sqlite::rusqlite::{OptionalExtension, named_params};
+use std::fmt::{self, Display, Formatter};
+use db;
+
+/// Errors that can occur during model operations.
+#[derive(Debug)]
+pub enum ModelError {
+    Sqlite(rusqlite::Error),
+    Pool(r2d2::Error),
+}
+
+impl Display for ModelError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Sqlite(err) => write!(f, "SQLite error: {err}"),
+            Self::Pool(err) => write!(f, "SQLite pool error: {err}"),
+        }
+    }
+}
+
+impl std::error::Error for ModelError {}
+
+impl From<rusqlite::Error> for ModelError {
+    fn from(value: rusqlite::Error) -> Self {
+        Self::Sqlite(value)
+    }
+}
+
+impl From<r2d2::Error> for ModelError {
+    fn from(value: r2d2::Error) -> Self {
+        Self::Pool(value)
+    }
+}
 
 /// Shared result type for model operations.
-pub type ModelResult<T> = Result<T, rusqlite::Error>;
+pub type ModelResult<T> = Result<T, ModelError>;
 
 /// A simple representation of a user account.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,22 +76,18 @@ impl User {
 }
 
 /// SQLite-backed user model.
-///
-/// A mutex guards the underlying connection to ensure SQLite receives only one
-/// write at a time, which avoids `database is locked` errors.
 #[derive(Clone)]
 pub struct SqliteUserModel {
-    connection: Arc<Mutex<Connection>>,
 }
 
 impl SqliteUserModel {
-    pub fn new(connection: Arc<Mutex<Connection>>) -> Self {
-        Self { connection }
+    pub fn new() -> Self {
+        Self {}
     }
 
     /// Insert a new user and return the created record.
     pub fn create_user(&self, username: &str, email: &str) -> ModelResult<User> {
-        let conn = self.connection.lock().expect("connection poisoned");
+        let conn = db::pool();
         conn.execute(
             "INSERT INTO users (username, email) VALUES (:username, :email) \
              ON CONFLICT(username) DO NOTHING;",
@@ -68,12 +96,11 @@ impl SqliteUserModel {
 
         let changes = conn.changes();
         let id = conn.last_insert_rowid() as u64;
-        drop(conn);
 
         if changes == 0 {
             return self
                 .find_user_by_username(username)?
-                .ok_or_else(|| rusqlite::Error::QueryReturnedNoRows);
+                .ok_or_else(|| rusqlite::Error::QueryReturnedNoRows.into());
         }
 
         Ok(User::new(id, username, email))
@@ -81,7 +108,7 @@ impl SqliteUserModel {
 
     /// Fetch a user by id.
     pub fn find_user(&self, id: u64) -> ModelResult<Option<User>> {
-        let conn = self.connection.lock().expect("connection poisoned");
+        let conn = db::pool();
         conn.prepare_cached("SELECT id, username, email FROM users WHERE id = ?1;")?
             .query_row([id], |row| {
                 Ok(User::new(
@@ -95,7 +122,7 @@ impl SqliteUserModel {
 
     /// Fetch a user by username.
     pub fn find_user_by_username(&self, username: &str) -> ModelResult<Option<User>> {
-        let conn = self.connection.lock().expect("connection poisoned");
+        let conn = db::pool();
         conn.prepare_cached("SELECT id, username, email FROM users WHERE username = ?1;")?
             .query_row([username], |row| {
                 Ok(User::new(
@@ -111,8 +138,8 @@ impl SqliteUserModel {
 #[cfg(test)]
 mod tests {
     use super::{SqliteUserModel, User};
-    use rusqlite::Connection;
-    use std::sync::{Arc, Mutex};
+    use r2d2::Pool;
+    use r2d2_sqlite::SqliteConnectionManager;
 
     #[test]
     fn builds_user() {
@@ -124,14 +151,17 @@ mod tests {
 
     #[test]
     fn creates_and_reads_user() {
-        let connection = Connection::open_in_memory().expect("memory db");
+        let manager = SqliteConnectionManager::memory();
+        let pool = Pool::builder().max_size(1).build(manager).expect("pool");
+        let connection = pool.get().expect("conn");
         connection
             .execute_batch(
                 "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, email TEXT UNIQUE);",
             )
             .expect("create table");
 
-        let model = SqliteUserModel::new(Arc::new(Mutex::new(connection)));
+        drop(connection);
+        let model = SqliteUserModel::new(pool);
         let created = model
             .create_user("test-user", "test@example.com")
             .expect("create");
@@ -142,14 +172,17 @@ mod tests {
 
     #[test]
     fn returns_existing_user_when_username_conflicts() {
-        let connection = Connection::open_in_memory().expect("memory db");
+        let manager = SqliteConnectionManager::memory();
+        let pool = Pool::builder().max_size(1).build(manager).expect("pool");
+        let connection = pool.get().expect("conn");
         connection
             .execute_batch(
                 "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, email TEXT UNIQUE);",
             )
             .expect("create table");
 
-        let model = SqliteUserModel::new(Arc::new(Mutex::new(connection)));
+        drop(connection);
+        let model = SqliteUserModel::new(pool);
         let first = model
             .create_user("dupe", "first@example.com")
             .expect("create");

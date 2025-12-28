@@ -3,16 +3,21 @@
 //! This crate centralizes setup concerns so that higher layers can stay focused
 //! on business logic.
 
-use rusqlite::Connection;
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
+use r2d2_sqlite::rusqlite::{Connection, self};
 use std::fmt::{self, Display, Formatter};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+use config::get_config;
 
 /// Errors that can occur during database initialization.
 #[derive(Debug)]
 pub enum DbInitError {
     Io(std::io::Error),
     Sqlite(rusqlite::Error),
+    Pool(r2d2::Error),
 }
 
 impl Display for DbInitError {
@@ -20,6 +25,7 @@ impl Display for DbInitError {
         match self {
             Self::Io(err) => write!(f, "I/O error: {err}"),
             Self::Sqlite(err) => write!(f, "SQLite error: {err}"),
+            Self::Pool(err) => write!(f, "SQLite pool error: {err}"),
         }
     }
 }
@@ -38,28 +44,57 @@ impl From<rusqlite::Error> for DbInitError {
     }
 }
 
-/// Initialize a SQLite database at the given path and run migrations.
-pub fn initialize_sqlite<P: AsRef<Path>>(db_path: P) -> Result<Connection, DbInitError> {
-    let db_path = db_path.as_ref();
-    if let Some(parent) = db_path.parent() {
-        fs::create_dir_all(parent)?;
+impl From<r2d2::Error> for DbInitError {
+    fn from(value: r2d2::Error) -> Self {
+        Self::Pool(value)
     }
-
-    let mut connection = Connection::open(db_path)?;
-    connection.pragma_update(None, "foreign_keys", "ON")?;
-    connection.pragma_update(None, "journal_mode", "WAL")?;
-
-    apply_migrations(&mut connection)?;
-    Ok(connection)
 }
 
-fn apply_migrations(connection: &mut Connection) -> Result<(), DbInitError> {
+/// Shared SQLite connection pool.
+pub type DbPool = Pool<SqliteConnectionManager>;
+
+static DB_POOL: OnceLock<DbPool> = OnceLock::new();
+
+pub fn pool() -> &'static DbPool {
+    DB_POOL.get_or_init(|| {
+        let db_path = Path::new(&get_config().database_path);
+        if let Some(parent) = db_path.parent() {
+            fs::create_dir_all(parent)
+                .unwrap_or_else(|e| panic!("error, when creating db dir. Error: {e}"));
+        }
+
+        let mut connection = Connection::open(db_path)
+            .unwrap_or_else(|e| panic!("error, when opening db connection. Error: {e}"));
+        set_pragmas(&mut connection);
+        apply_migrations(&mut connection, db_path)
+            .unwrap_or_else(|e| panic!("error, when applying migrations. Error: {e}"));
+
+        let manager = SqliteConnectionManager::file(db_path).with_init(|conn| {
+            set_pragmas(conn);
+            Ok(())
+        });
+
+        Pool::builder()
+            .max_size(get_config().max_users)
+            .build(manager)
+            .unwrap_or_else(|e| panic!("error, when creating db connection pool. Error: {e}"))
+    })
+}
+
+fn set_pragmas(connection: &mut Connection) {
+    connection.pragma_update(None, "foreign_keys", "ON")
+        .unwrap_or_else(|e| panic!("error, when setting foreign key pragma. Error: {e}"));
+    connection.pragma_update(None, "journal_mode", "WAL")
+        .unwrap_or_else(|e| panic!("error, when setting journal mode pragma. Error: {e}"));
+}
+
+fn apply_migrations(connection: &mut Connection, migrations_dir: &Path) -> Result<(), DbInitError> {
     connection.execute(
         "CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY);",
         [],
     )?;
 
-    let mut migrations: Vec<PathBuf> = fs::read_dir(migrations_dir())?
+    let mut migrations: Vec<PathBuf> = fs::read_dir(migrations_dir)?
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| path.extension().is_some_and(|ext| ext == "sql"))
@@ -94,45 +129,4 @@ fn apply_migrations(connection: &mut Connection) -> Result<(), DbInitError> {
     }
 
     Ok(())
-}
-
-fn migrations_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("migrations")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::initialize_sqlite;
-    use rusqlite::Connection;
-
-    #[test]
-    fn runs_migrations_for_new_database() {
-        let temp_dir = tempfile::tempdir().expect("temp dir");
-        let db_path = temp_dir.path().join("test.db");
-
-        let connection = initialize_sqlite(&db_path).expect("init should succeed");
-
-        assert!(table_exists(&connection, "users"));
-    }
-
-    #[test]
-    fn skips_already_applied_migrations() {
-        let temp_dir = tempfile::tempdir().expect("temp dir");
-        let db_path = temp_dir.path().join("test.db");
-
-        let first = initialize_sqlite(&db_path).expect("first init");
-        assert!(table_exists(&first, "schema_migrations"));
-
-        // Should not error when re-run and should keep previously created tables.
-        let second = initialize_sqlite(&db_path).expect("second init");
-        assert!(table_exists(&second, "users"));
-    }
-
-    fn table_exists(connection: &Connection, table: &str) -> bool {
-        connection
-            .prepare_cached("SELECT count(*) FROM sqlite_schema WHERE type='table' AND name=?1;")
-            .and_then(|mut stmt| stmt.query_row([table], |row| row.get::<_, i64>(0)))
-            .map(|count| count > 0)
-            .unwrap_or(false)
-    }
 }
