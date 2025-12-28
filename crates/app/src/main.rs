@@ -10,8 +10,11 @@ use std::{
     backtrace::Backtrace,
     io::{self, BufReader, prelude::*, ErrorKind},
     net::{TcpListener, TcpStream},
-    sync::{OnceLock, mpsc},
+    os::unix::io::AsRawFd,
+    sync::{Arc, OnceLock, mpsc},
 };
+use mio::{Events, Interest, Poll, Token, Waker};
+use mio::unix::SourceFd;
 use rand; 
 use tungstenite::{accept, Message, Bytes, WebSocket};
 
@@ -24,14 +27,18 @@ static CUSTOM_HTMX_JS: &[u8] = include_bytes!("../../../static/custom_htmx.js");
 
 static WATCHER_POOL: OnceLock<ThreadPool> = OnceLock::new();
 fn get_watcher_pool() -> &'static ThreadPool {
-    let max_users = get_config().max_users;
-    WATCHER_POOL.get_or_init(|| ThreadPool::new(max_users * 2)) // each user will need two threads one
+    WATCHER_POOL.get_or_init(|| {
+        let max_users = get_config().max_users;
+        ThreadPool::new(max_users * 2)
+    }) // each user will need two threads one
 }
 
 static DEPLOYMENT_POOL: OnceLock<ThreadPool> = OnceLock::new();
 fn get_deployment_pool() -> &'static ThreadPool {
-    let max_users = get_config().max_users;
-    DEPLOYMENT_POOL.get_or_init(|| ThreadPool::new(max_users)) 
+    DEPLOYMENT_POOL.get_or_init(|| {
+        let max_users = get_config().max_users;
+        ThreadPool::new(max_users)
+    }) 
 }
 
 
@@ -178,50 +185,107 @@ fn handle_websocket_connection(stream: TcpStream) {
     let mut last_rx = Instant::now();
     let mut ping_in_flight: Option<Instant> = None;
 
-    let result = websocket.get_mut().set_read_timeout(Some(Duration::from_millis(250)));
-    match result {
-        Ok(()) => (),
-        Err(err) => {
-            let bt = Backtrace::capture();
-            eprintln!("error, unable to set read timeout for handling websocket connection. Error: {}. Stack: {:?}", err, bt);
-            return
-        }
+    if let Err(err) = websocket.get_mut().set_nonblocking(true) {
+        let bt = Backtrace::capture();
+        eprintln!("error, unable to set non-blocking for websocket. Error: {}. Stack: {:?}", err, bt);
+        return
     }
 
+    let mut poll = match Poll::new() {
+        Ok(p) => p,
+        Err(err) => {
+            let bt = Backtrace::capture();
+            eprintln!("error, when creating websocket poll. Error: {}. Stack: {:?}", err, bt);
+            return
+        }
+    };
+    let mut events = Events::with_capacity(64);
+    const SOCKET: Token = Token(0);
+    const WAKE: Token = Token(1);
+
+    let raw_fd = websocket.get_ref().as_raw_fd();
+    let mut socket_source = SourceFd(&raw_fd);
+    if let Err(err) = poll.registry().register(&mut socket_source, SOCKET, Interest::READABLE) {
+        let bt = Backtrace::capture();
+        eprintln!("error, when registering websocket socket with poll. Error: {}. Stack: {:?}", err, bt);
+        return
+    }
+    let waker = match Waker::new(poll.registry(), WAKE) {
+        Ok(w) => Arc::new(w),
+        Err(err) => {
+            let bt = Backtrace::capture();
+            eprintln!("error, when registering websocket waker. Error: {}. Stack: {:?}", err, bt);
+            return
+        }
+    };
+    let (out_tx, out_rx) = mpsc::channel::<Message>();
+
     loop {
-        match websocket.read() {
-            Ok(msg) => {
-                // Any inbound traffic counts as “alive”
-                last_rx = Instant::now();
-                ping_in_flight = None;
-                match msg {
-                    Message::Ping(_) => {
-                        // tungstenite will auto-reply to ping/pongs but we still list them in this
-                        // match statement so application logic handling doesn't get handed control
-                        // logic messages
-                    }
-                    Message::Pong(_) => {
-                        // good, client is alive, but we already cleared ping_in_flight because any
-                        // traffic counts as proof of life
-                    }
-                    Message::Close(frame) => {
-                        websocket.send(Message::Close(frame))
-                            .unwrap_or_else(|e| eprintln!("error, when sending close response in response to close request. Error: {}", e));
-                        break;
-                    }
-                    other => {
-                        handle_app_message(&mut websocket, other);
+        let now = Instant::now();
+        let ping_deadline = last_rx + ping_interval;
+        let timeout = match ping_in_flight {
+            Some(t0) => {
+                let pong_deadline = t0 + pong_timeout;
+                let deadline = if ping_deadline < pong_deadline { ping_deadline } else { pong_deadline };
+                deadline.saturating_duration_since(now)
+            }
+            None => ping_deadline.saturating_duration_since(now),
+        };
+        if let Err(err) = poll.poll(&mut events, Some(timeout)) {
+            let bt = Backtrace::capture();
+            eprintln!("error, when polling websocket. Error: {}. Stack: {:?}", err, bt);
+            return
+        }
+
+        for event in events.iter() {
+            match event.token() {
+                SOCKET => {
+                    loop {
+                        match websocket.read() {
+                            Ok(msg) => {
+                                // Any inbound traffic counts as “alive”
+                                last_rx = Instant::now();
+                                ping_in_flight = None;
+                                match msg {
+                                    Message::Ping(_) => {
+                                        // tungstenite will auto-reply to ping/pongs but we still list them in this
+                                        // match statement so application logic handling doesn't get handed control
+                                        // logic messages
+                                    }
+                                    Message::Pong(_) => {
+                                        // good, client is alive, but we already cleared ping_in_flight because any
+                                        // traffic counts as proof of life
+                                    }
+                                    Message::Close(frame) => {
+                                        websocket.send(Message::Close(frame))
+                                            .unwrap_or_else(|e| eprintln!("error, when sending close response in response to close request. Error: {}", e));
+                                        return
+                                    }
+                                    other => {
+                                        handle_app_message(&out_tx, &waker, other);
+                                    }
+                                }
+                            }
+                            Err(e) if is_timeout(&e) => break,
+                            Err(err) => {
+                                let bt = Backtrace::capture();
+                                eprintln!("error, when reading websocket message. Error: {}. Stack: {:?}", err, bt);
+                                return
+                            }
+                        }
                     }
                 }
+                WAKE => {
+                    if drain_outbound(&out_rx, &mut websocket).is_err() {
+                        return
+                    }
+                }
+                _ => {}
             }
-            Err(e) if is_timeout(&e) => {
-                // No message arrived within read_timeout; fall through to timer checks.
-            }
-            Err(err) => {
-                let bt = Backtrace::capture();
-                eprintln!("error, when reading websocket message. Error: {}. Stack: {:?}", err, bt);
-                return
-            }
+        }
+
+        if drain_outbound(&out_rx, &mut websocket).is_err() {
+            return
         }
 
         let now = Instant::now();
@@ -252,50 +316,58 @@ fn handle_websocket_connection(stream: TcpStream) {
 
 
 
-fn handle_app_message(websocket: &mut WebSocket<TcpStream>, msg: Message) {
+fn handle_app_message(out_tx: &mpsc::Sender<Message>, waker: &Arc<Waker>, msg: Message) {
     // custom ping / pong started by client since the client doesn't know when it can reconnect due to no
     // access to control frames
     let message = msg.to_string();
     if message == "ping" {
-        let result = websocket.send(Message::Text("pong".into()));
-        match result {
-            Ok(()) => (),
-            Err(err) => {
-                let bt = Backtrace::capture();
-                eprintln!("error, when writing to websocket connection for pong. Error: {}. Stack: {:?}", err, bt);
-                return
-            }
-        }
+        queue_outbound(out_tx, waker, Message::Text("pong".into()));
     } else {
         let response = format!("deploying {}", message);
-        let result = websocket.send(Message::Text(response.into()));
-        if let Err(err) = result {
-            let bt = Backtrace::capture();
-            eprintln!("error, when writing to websocket connection. Error: {}. Stack: {:?}", err, bt);
-            return
-        }
+        queue_outbound(out_tx, waker, Message::Text(response.into()));
         let rx = start_deploy();
-        let mut got = 0;
-        loop {
-            match rx.recv() {
-                Ok(DeployEvent::Output(message)) => {
-                    if let Err(e) = websocket.send(Message::Text(message.into())) {
-                        eprintln!("error, when writing to websocket connection for streaming stdout. Error: {}", e);
-                        break;
-                    };
-                }
-                Ok(DeployEvent::Done) => {
-                    got += 1;
-                    if got == 2 {
-                        break;
-                    }
-                }
-                Ok(DeployEvent::Error(message)) => {
-                    let _ = websocket.send(Message::Text(message.into()));
+        let out_tx = out_tx.clone();
+        let waker = Arc::clone(waker);
+        get_deployment_pool().execute(move || {
+            forward_deploy_events(rx, out_tx, waker);
+        });
+    }
+}
+
+fn queue_outbound(out_tx: &mpsc::Sender<Message>, waker: &Waker, msg: Message) {
+    if out_tx.send(msg).is_ok() {
+        let _ = waker.wake();
+    }
+}
+
+fn drain_outbound(out_rx: &mpsc::Receiver<Message>, websocket: &mut WebSocket<TcpStream>) -> Result<(), ()> {
+    while let Ok(msg) = out_rx.try_recv() {
+        if let Err(err) = websocket.send(msg) {
+            eprintln!("error, when writing to websocket connection. Error: {}", err);
+            return Err(())
+        }
+    }
+    Ok(())
+}
+
+fn forward_deploy_events(rx: mpsc::Receiver<DeployEvent>, out_tx: mpsc::Sender<Message>, waker: Arc<Waker>) {
+    let mut got = 0;
+    loop {
+        match rx.recv() {
+            Ok(DeployEvent::Output(message)) => {
+                queue_outbound(&out_tx, &waker, Message::Text(message.into()));
+            }
+            Ok(DeployEvent::Done) => {
+                got += 1;
+                if got == 2 {
                     break;
                 }
-                Err(_) => break, // all senders dropped
             }
+            Ok(DeployEvent::Error(message)) => {
+                queue_outbound(&out_tx, &waker, Message::Text(message.into()));
+                break;
+            }
+            Err(_) => break, // all senders dropped
         }
     }
 }
