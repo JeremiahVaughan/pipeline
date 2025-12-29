@@ -23,6 +23,9 @@ use tungstenite::{accept, Message, Bytes, WebSocket};
 // access. Also means you just ship the binary instead of files.
 static CUSTOM_HTMX_JS: &[u8] = include_bytes!("../../../static/custom_htmx.js"); 
 static FIRE_TRUCK_SVG: &[u8] = include_bytes!("../../../static/firetruck.svg"); 
+static AMBULANCE_TRUCK_SVG: &[u8] = include_bytes!("../../../static/ambulance.svg"); 
+static POLICE_SVG: &[u8] = include_bytes!("../../../static/police.svg"); 
+static ANIMATION_CSS: &[u8] = include_bytes!("../../../static/animation.css"); 
 // static WASM_HELLO: &[u8] = include_bytes!("../wasm-hello/pkg/wasm_hello.js");
 // static WASM_HELLO_RUST: &[u8] = include_bytes!("../wasm-hello/pkg/wasm_hello_bg.wasm");
 
@@ -101,9 +104,27 @@ fn handle_http_connection(mut stream: TcpStream) {
             "application/javascript; charset=utf-8",
             true,
         ),
+        "GET /static/animation.css HTTP/1.1" => (
+            "HTTP/1.1 200 OK",
+            ANIMATION_CSS,
+            "text/css",
+            true,
+        ),
         "GET /static/firetruck.svg HTTP/1.1" => (
             "HTTP/1.1 200 OK",
             FIRE_TRUCK_SVG,
+            "image/svg+xml",
+            true,
+        ),
+        "GET /static/ambulance.svg HTTP/1.1" => (
+            "HTTP/1.1 200 OK",
+            AMBULANCE_TRUCK_SVG,
+            "image/svg+xml",
+            true,
+        ),
+        "GET /static/police.svg HTTP/1.1" => (
+            "HTTP/1.1 200 OK",
+            POLICE_SVG,
             "image/svg+xml",
             true,
         ),

@@ -14,11 +14,15 @@ pub fn get_home(services: &[Service]) -> Vec<u8> {
                 style {
                     (Raw::dangerously_create(HOME_CSS))
                 }
+                link rel="stylesheet" href="/static/animation.css";
             }
             body {
                 h1 { "Hello!" }
                 p { "Me rust!" }
-                img src="/static/firetruck.svg" loading="lazy" alt="firetruck" width="96" height="96";
+                img.firetruck src="/static/firetruck.svg" loading="lazy" alt="firetruck" width="96" height="96";
+                img.ambulance src="/static/ambulance.svg" loading="lazy" alt="ambulance" width="96" height="96";
+                img.police src="/static/police.svg" loading="lazy" alt="police" width="50" height="50";
+
                 form #publish-form {
                     label {
                         "Message:"
