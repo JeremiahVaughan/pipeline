@@ -163,7 +163,7 @@ mod tests {
             .expect("create table");
 
         drop(connection);
-        let model = SqliteUserModel::new(pool);
+        let model = SqliteUserModel::new();
         let created = model
             .create_user("test-user", "test@example.com")
             .expect("create");
@@ -184,7 +184,7 @@ mod tests {
             .expect("create table");
 
         drop(connection);
-        let model = SqliteUserModel::new(pool);
+        let model = SqliteUserModel::new();
         let first = model
             .create_user("dupe", "first@example.com")
             .expect("create");

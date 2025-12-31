@@ -1,10 +1,11 @@
 use hypertext::{ Raw, maud, prelude::* };
-use config::Service;
+use std::collections::BTreeMap;
+use config::ServiceConfig;
 
 static WEBSOCKET_CLIENT: &str = include_str!("../../../static/ws.js"); 
 static HOME_CSS: &str = include_str!("../../../static/home.css"); 
 
-pub fn get_home(services: &[Service]) -> Vec<u8> {
+pub fn get_home(services: &BTreeMap<String, Vec<ServiceConfig>>) -> Vec<u8> {
     maud! {
         html {
             head {
@@ -36,10 +37,10 @@ pub fn get_home(services: &[Service]) -> Vec<u8> {
                 }
                 h2 { "Messages on 'demo'" }
                 ul #messages {
-                    @for item in services {
+                    @for (name, _) in services {
                         li.item {
                             button {
-                                (item.name)
+                                (name)
                             }
                         }
                     }
