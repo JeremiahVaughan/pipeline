@@ -1,0 +1,10 @@
+[package]
+name = "db"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+config = { path = "../config" }
+r2d2 = "0.8"
+r2d2_sqlite = { version = "0.25", features = ["bundled"] }

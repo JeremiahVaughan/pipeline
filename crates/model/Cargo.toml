@@ -1,0 +1,9 @@
+[package]
+name = "model"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+r2d2 = "0.8"
+r2d2_sqlite = { version = "0.25", features = ["bundled"] }
+db = { path = "../db" }

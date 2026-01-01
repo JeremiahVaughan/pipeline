@@ -1,0 +1,89 @@
+# Goals
+# 1. Deployment configuration that includes the local development environment as an enviromnent so it can be managed as well.
+# 2. Allow simple deployments ship files directly deployments. 
+# 3. Declaritive
+
+# Application configuration
+
+database_path = "/data/pipeline.db"
+migrations_dir = "../crates/db/migrations"
+max_users = 20
+
+
+# repos are a seperate entity than service because a single repo can contain multiple services. 
+[repos.create]
+vcs = "fossil"
+clone_url = "ssh://example.com//home/pi/museum/create.fossil"
+dir = "~/create"
+db_file = "~/museum/create.fossil"
+
+[repos.pipeline]
+vcs = "git"
+clone_url = "https://github.com/example/example.git"
+dir = "~/create_git"
+
+
+# Make sure you set host IPs to static or DHCP Reservation so the IP doesn't change.
+[nodes.local]
+host_name = "127.0.0.1"
+user = "pi"
+port = 22
+[nodes.pi1]
+host_name = "192.168.1.34"
+user = "pi"
+port = 22
+[nodes.pi2]
+host_name = "192.168.1.53"
+user = "pi"
+port = 22
+[nodes.pi3]
+host_name = "192.168.1.35"
+user = "pi"
+port = 22
+[nodes.pi4]
+host_name = "192.168.1.54"
+user = "pi"
+port = 22
+
+
+# ci nodes are prioritized from left to right based on availability
+[ci]
+nodes = ["local", "pi2"]
+
+[environments.development]
+nodes = ["local"]
+[environments.staging]
+nodes = ["pi1", "pi2"]
+[environments.production]
+nodes = ["pi3", "pi4"]
+
+
+[[services.example_service_1]]
+# create is where the source code lives
+create_workspace = "~/create/example_service_1"
+# build is where artifacts are placed when building
+build_workspace = "~/build/example_service_1"
+# deploy is where the artifacts are placed on the deployment nodes
+deploy_workspace = "~/deploy/example_service_1"
+deploy_as_root = false
+
+[[services.example_service_1.development]]
+nodes = ["local"]
+[[services.example_service_1.staging]]
+nodes = ["pi1"]
+[[services.example_service_1.production]]
+nodes = ["pi2"]
+
+
+[[services.example_service_2]]
+create_workspace = "~/create/example_service_2"
+build_workspace = "~/build/example_service_2"
+deploy_workspace = "~/deploy/example_service_2"
+deploy_as_root = false
+
+[[services.example_service_2.development]]
+nodes = ["local"]
+[[services.example_service_2.staging]]
+nodes = ["pi3"]
+[[services.example_service_2.production]]
+nodes = ["pi4"]

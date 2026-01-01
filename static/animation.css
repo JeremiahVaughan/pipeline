@@ -1,0 +1,49 @@
+.firetruck {
+    display: block;
+    margin-top: 1rem;
+    animation: firetruck-drive 6s linear infinite;
+    transform: translateX(-120px);
+    animation-delay: 1s;
+}
+
+@keyframes firetruck-drive {
+    0% {
+        transform: translateX(-120px);
+    }
+    100% {
+        transform: translateX(calc(100vw + 120px));
+    }
+}
+
+.ambulance {
+    display: block;
+    margin-top: 1rem;
+    animation: ambulance-drive 4s linear infinite;
+    transform: translateX(-120px);
+}
+
+@keyframes ambulance-drive {
+    0% {
+        transform: translateX(-120px);
+    }
+    100% {
+        transform: translateX(calc(100vw + 120px));
+    }
+}
+
+
+.police {
+    display: block;
+    margin-top: 1rem;
+    animation: police-drive 7s linear infinite;
+    transform: translateX(-120px);
+}
+
+@keyframes police-drive {
+    0% {
+        transform: translateX(-120px);
+    }
+    100% {
+        transform: translateX(calc(100vw + 120px));
+    }
+}

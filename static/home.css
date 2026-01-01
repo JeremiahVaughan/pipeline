@@ -1,0 +1,11 @@
+h1 {
+    color: #ff0000;
+}
+button {
+    padding: .2rem;
+}
+
+body {
+    overflow-x: hidden;
+}
+
