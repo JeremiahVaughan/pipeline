@@ -20,6 +20,7 @@ pub struct AppConfig {
     pub max_users: usize,
     pub repos: BTreeMap<String, RepoConfig>,
     pub nodes: BTreeMap<String, NodeConfig>,
+    pub ci: CiConfig,
     pub environments: BTreeMap<String, EnvironmentConfig>,
     pub services: BTreeMap<String, Vec<ServiceConfig>>,
 }
@@ -55,6 +56,11 @@ pub struct NodeConfig {
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct EnvironmentConfig {
+    pub nodes: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+pub struct CiConfig {
     pub nodes: Vec<String>,
 }
 
@@ -156,6 +162,10 @@ fn validate_config(config: &AppConfig) -> Result<(), String> {
         }
     }
 
+    if config.ci.nodes.is_empty() {
+        return Err("no ci nodes defined".to_string());
+    }
+
     if config.environments.is_empty() {
         return Err("no environments defined".to_string());
     }
@@ -240,7 +250,7 @@ where
         type Value = usize;
 
         fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-            formatter.write_str("a port as an integer or numeric string")
+            formatter.write_str("a port as an integer")
         }
 
         fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
@@ -250,15 +260,14 @@ where
             usize::try_from(value).map_err(|_| E::custom("port is too large"))
         }
 
-        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
         where
             E: de::Error,
         {
-            value
-                .trim()
-                .parse::<u16>()
-                .map(usize::from)
-                .map_err(|_| E::custom("port must be a valid integer"))
+            if value < 0 {
+                return Err(E::custom("port must be non-negative"));
+            }
+            usize::try_from(value).map_err(|_| E::custom("port is too large"))
         }
     }
 

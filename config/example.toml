@@ -28,23 +28,28 @@ dir = "~/create_git"
 [nodes.local]
 host_name = "127.0.0.1"
 user = "pi"
-port = "22" 
+port = 22
 [nodes.pi1]
 host_name = "192.168.1.34"
 user = "pi"
-port = "22" 
+port = 22
 [nodes.pi2]
 host_name = "192.168.1.53"
 user = "pi"
-port = "22" 
+port = 22
 [nodes.pi3]
 host_name = "192.168.1.35"
 user = "pi"
-port = "22" 
+port = 22
 [nodes.pi4]
 host_name = "192.168.1.54"
 user = "pi"
-port = "22" 
+port = 22
+
+
+# ci nodes are prioritized from left to right based on availability
+[ci]
+nodes = ["local", "pi2"]
 
 [environments.development]
 nodes = ["local"]
