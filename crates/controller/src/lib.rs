@@ -21,3 +21,31 @@ impl UserController {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum AppEvent {
+    Ping,
+    Deploy(String),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum ParseEventError {
+    UnknownKind,
+    MissingArg,
+    ExtraData,
+}
+
+pub fn parse_event(text: &str) -> Result<AppEvent, ParseEventError> {
+    let mut it = text.splitn(2, ':');
+    let kind = it.next().unwrap_or("");
+    let rest = it.next();
+    match kind {
+        "ping" => {
+            if rest.is_some() { Err(ParseEventError::ExtraData) } else { Ok(AppEvent::Ping) }
+        }
+        "deploy" => match rest {
+            Some(service) if !service.is_empty() => Ok(AppEvent::Deploy(service.to_string())),
+            _ => Err(ParseEventError::MissingArg),
+        },
+        _ => Err(ParseEventError::UnknownKind),
+    }
+}
