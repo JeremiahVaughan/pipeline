@@ -362,6 +362,38 @@ fn handle_websocket_connection(stream: TcpStream) {
     }
 }
 
+enum Event {
+    Ping,
+    Deploy(String),
+}
+
+#[derive(Debug)]
+enum ParseEventError {
+    UnknownKind,
+    MissingArg,
+    ExtraData,
+}
+
+impl TryFrom<Message> for Event {
+    type Error = ParseEventError;
+
+    fn try_from(msg: Message) -> Result<Self, Self::Error> {
+        let s = msg.to_string();
+        let mut it = s.splitn(2, ':');
+        let kind = it.next().unwrap();
+        let rest = it.next();
+        match kind {
+            "ping" => {
+                if rest.is_some() { Err(ParseEventError::ExtraData) } else { Ok(Event::Ping) }
+            },
+            "deploy" => match rest {
+                Some(service) if !service.is_empty() => Ok(Event::Deploy(service.to_string())),
+                _ => Err(ParseEventError::MissingArg),
+            },
+            _ => Err(ParseEventError::UnknownKind)
+        }
+    }
+}
 
 
 fn handle_app_message(
@@ -374,29 +406,31 @@ fn handle_app_message(
 ) {
     // custom ping / pong started by client since the client doesn't know when it can reconnect due to no
     // access to control frames
-    let message = msg.to_string();
-    if message == "ping" {
-        outbox.push_back(Message::Text("pong".into()));
-    } else {
-        let response = format!("deploying {}", message);
-        outbox.push_back(Message::Text(response.into()));
-        if deploy.is_some() {
-            outbox.push_back(Message::Text("deploy already running".into()));
-            return
-        }
-        match spawn_deploy() {
-            Ok(mut dep) => {
-                if register_child_fds(poll, &mut dep).is_err() {
-                    return
+    match Event::try_from(msg) {
+        Ok(Event::Ping) => outbox.push_back(Message::Text("pong".into())),
+        Ok(Event::Deploy(s)) => { 
+            outbox.push_back(Message::Text(format!("new deployment: {}", s).into()));
+            if deploy.is_some() {
+                outbox.push_back(Message::Text("deploy already running".into()));
+                return
+            }
+            match spawn_deploy() {
+                Ok(mut dep) => {
+                    if register_child_fds(poll, &mut dep).is_err() {
+                        return
+                    }
+                    *deploy = Some(dep);
                 }
-                *deploy = Some(dep);
-            }
-            Err(err) => {
-                let msg = format!("deploy failed: {}", err);
-                eprintln!("error, when running deploy: {}", msg);
-                outbox.push_back(Message::Text(msg.into()));
+                Err(err) => {
+                    let msg = format!("deploy failed: {}", err);
+                    eprintln!("error, when running deploy: {}", msg);
+                    outbox.push_back(Message::Text(msg.into()));
+                }
             }
         }
+        Err(ParseEventError::UnknownKind) => outbox.push_back(Message::Text("error, unknown event kind".into())),
+        Err(ParseEventError::MissingArg) => outbox.push_back(Message::Text("error, missing event arg".into())),
+        Err(ParseEventError::ExtraData) => outbox.push_back(Message::Text("error, excess data in event call".into())),
     }
     let write_work_needed = !outbox.is_empty();
     if *want_write != write_work_needed {
@@ -577,7 +611,7 @@ fn finalize_deploy(poll: &mut Poll, deploy: &mut DeployChild, outbox: &mut VecDe
             return Err(())
         }
     };
-            outbox.push_back(Message::Text(format!("child process exited: {status}").into()));
+    outbox.push_back(Message::Text(format!("child process exited: {status}").into()));
     let mut stdout_source = SourceFd(&deploy.stdout_fd);
     let _ = poll.registry().deregister(&mut stdout_source);
     let mut stderr_source = SourceFd(&deploy.stderr_fd);
