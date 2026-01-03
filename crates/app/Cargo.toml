@@ -7,6 +7,7 @@ edition = "2024"
 config = { path = "../config" }
 controller = { path = "../controller" }
 db = { path = "../db" }
+http = { path = "../http" }
 model = { path = "../model" }
 view = { path = "../view" }
 ws = { path = "../ws" }

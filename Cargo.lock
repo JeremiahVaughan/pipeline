@@ -21,6 +21,7 @@ dependencies = [
  "config",
  "controller",
  "db",
+ "http 0.1.0",
  "model",
  "view",
  "ws",
@@ -205,6 +206,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d1ad449764d627e22bfd7cd5e8868264fc9236e07c752972b4080cd351cb476"
 dependencies = [
  "utf8-width",
+]
+
+[[package]]
+name = "http"
+version = "0.1.0"
+dependencies = [
+ "config",
+ "view",
 ]
 
 [[package]]
@@ -643,7 +652,7 @@ checksum = "8628dcc84e5a09eb3d8423d6cb682965dea9133204e8fb3efee74c2a0c259442"
 dependencies = [
  "bytes",
  "data-encoding",
- "http",
+ "http 1.4.0",
  "httparse",
  "log",
  "rand",
