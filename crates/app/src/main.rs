@@ -334,6 +334,16 @@ fn handle_websocket_connection(stream: TcpStream) {
                     return
                 }
                 deploy = None;
+                if drain_outbound(&mut outbox, &mut websocket, &mut ping_in_flight).is_err() {
+                    return
+                }
+                let write_work_needed = !outbox.is_empty();
+                if want_write != write_work_needed {
+                    want_write = write_work_needed;
+                    if update_socket_interest(&mut poll, &mut socket_source, want_write).is_err() {
+                        return
+                    }
+                }
             }
         }
 
