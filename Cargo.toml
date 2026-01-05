@@ -2,7 +2,9 @@
 members = [
     "crates/app", "crates/config",
     "crates/controller", "crates/db",
+    "crates/http",
     "crates/model",
+    "crates/ws",
     "crates/view",
 ]
 resolver = "2"

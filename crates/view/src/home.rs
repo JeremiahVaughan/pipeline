@@ -10,7 +10,7 @@ pub fn get_home(services: &BTreeMap<String, Vec<ServiceConfig>>) -> Vec<u8> {
         html {
             head {
                 meta charset="utf-8";
-                title { "Hello!" }
+                title { "Axe" }
                 script type="module" src="/static/custom_htmx.js" defer {}
                 style {
                     (Raw::dangerously_create(HOME_CSS))
@@ -18,8 +18,8 @@ pub fn get_home(services: &BTreeMap<String, Vec<ServiceConfig>>) -> Vec<u8> {
                 link rel="stylesheet" href="/static/animation.css";
             }
             body {
-                h1 { "Hello!" }
-                p { "Me rust!" }
+                h1 { "Axe" }
+                p { "Services" }
                 img.firetruck src="/static/firetruck.svg" loading="lazy" alt="firetruck" width="96" height="96";
                 img.ambulance src="/static/ambulance.svg" loading="lazy" alt="ambulance" width="96" height="96";
                 img.police src="/static/police.svg" loading="lazy" alt="police" width="50" height="50";

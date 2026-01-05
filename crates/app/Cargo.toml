@@ -7,9 +7,7 @@ edition = "2024"
 config = { path = "../config" }
 controller = { path = "../controller" }
 db = { path = "../db" }
+http = { path = "../http" }
 model = { path = "../model" }
 view = { path = "../view" }
-rand = "0.9.2"
-tungstenite = "0.28.0"
-mio = { version = "0.8", features = ["os-poll", "os-ext"] }
-libc = "0.2"
+ws = { path = "../ws" }
