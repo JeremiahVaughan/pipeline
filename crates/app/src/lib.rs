@@ -1,4 +1,4 @@
-pub use view::{get_home, get_not_found};
+pub use view::{get_landing_page, get_not_found};
 
 use std::{
     sync::{Arc, Mutex, mpsc},

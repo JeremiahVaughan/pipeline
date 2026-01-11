@@ -16,7 +16,7 @@ const SOCKET: Token = Token(0);
 const STDOUT: Token = Token(2);
 const STDERR: Token = Token(3);
 
-pub fn handle_websocket_connection(stream: TcpStream) {
+pub fn handle_websocket_connection(stream: TcpStream, app_version: &String) {
     let websocket = accept(stream);
     let mut websocket = match websocket {
         Ok(w) => w,
@@ -61,9 +61,20 @@ pub fn handle_websocket_connection(stream: TcpStream) {
         return
     }
 
-    let mut outbox: VecDeque<Message> = VecDeque::new();
+    let ready_message = format!("ready:{}", app_version);
+    let mut outbox: VecDeque<Message> = VecDeque::from([Message::Text(ready_message.into())]);
     let mut deploy: Option<DeployChild> = None;
     let mut want_write = false;
+    if drain_outbound(&mut outbox, &mut websocket, &mut ping_in_flight).is_err() {
+        return
+    }
+    let write_work_needed = !outbox.is_empty();
+    if want_write != write_work_needed {
+        want_write = write_work_needed;
+        if update_socket_interest(&mut poll, &mut socket_source, want_write).is_err() {
+            return
+        }
+    }
 
     loop {
         let now = Instant::now();
@@ -221,7 +232,7 @@ fn handle_app_message(
     match parse_event(&msg.to_string()) {
         Ok(AppEvent::Ping) => outbox.push_back(Message::Text("pong".into())),
         Ok(AppEvent::Deploy(s)) => {
-            outbox.push_back(Message::Text(format!("new deployment: {}", s).into()));
+            outbox.push_back(Message::Text(format!("new_deployment: {}", s).into()));
             if deploy.is_some() {
                 outbox.push_back(Message::Text("deploy already running".into()));
                 return

@@ -5,6 +5,7 @@
 
 # Application configuration
 
+environment = "development"
 database_path = "/data/pipeline.db"
 migrations_dir = "../crates/db/migrations"
 max_users = 20
@@ -58,7 +59,7 @@ nodes = ["pi1", "pi2"]
 nodes = ["pi3", "pi4"]
 
 
-[[services.example_service_1]]
+[services.example_service_1]
 # create is where the source code lives
 create_workspace = "~/create/example_service_1"
 # build is where artifacts are placed when building
@@ -75,7 +76,7 @@ nodes = ["pi1"]
 nodes = ["pi2"]
 
 
-[[services.example_service_2]]
+[services.example_service_2]
 create_workspace = "~/create/example_service_2"
 build_workspace = "~/build/example_service_2"
 deploy_workspace = "~/deploy/example_service_2"

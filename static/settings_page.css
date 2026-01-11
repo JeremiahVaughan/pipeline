@@ -1,0 +1,28 @@
+h1 {
+    color: #0000ff;
+}
+
+#messages {
+    display: flex;
+    justify-content: space-around;
+}
+
+.ci {
+    display: flex;
+    justify-content: space-around;
+}
+
+.env {
+    display: flex;
+    flex-direction: column;
+}
+
+.item {
+    border: solid 1px black;
+    padding: 2rem;
+}
+
+body {
+    overflow-x: hidden;
+}
+

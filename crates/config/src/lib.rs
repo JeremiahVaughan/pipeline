@@ -8,6 +8,7 @@ use serde::de::{self, Deserializer};
 use std::collections::BTreeMap;
 use std::fs;
 use std::sync::OnceLock;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Global configuration instance.
 static CONFIG: OnceLock<AppConfig> = OnceLock::new();
@@ -15,6 +16,11 @@ static CONFIG: OnceLock<AppConfig> = OnceLock::new();
 /// Top-level application configuration.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct AppConfig {
+
+    #[serde(skip_deserializing)]
+    pub app_version: String,
+
+    pub environment: String,
     pub database_path: String,
     pub migrations_dir: String,
     pub max_users: usize,
@@ -22,7 +28,7 @@ pub struct AppConfig {
     pub nodes: BTreeMap<String, NodeConfig>,
     pub ci: CiConfig,
     pub environments: BTreeMap<String, EnvironmentConfig>,
-    pub services: BTreeMap<String, Vec<ServiceConfig>>,
+    pub services: BTreeMap<String, ServiceConfig>,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -72,10 +78,20 @@ pub struct ServiceEnvironmentConfig {
 fn load_config() -> AppConfig {
     let contents = fs::read_to_string("./config.toml")
         .unwrap_or_else(|e| panic!("error, when reading config contents. Error: {e}"));
-    let config = toml::from_str::<AppConfig>(&contents)
+    let mut config = toml::from_str::<AppConfig>(&contents)
         .unwrap_or_else(|e| panic!("error, config failed to load. Error: {e}"));
     validate_config(&config)
         .unwrap_or_else(|e| panic!("error, config failed validation. Error: {e}"));
+    if config.environment == "development" {
+        let current_time = SystemTime::now();
+        let duration_since_epoch = current_time
+            .duration_since(UNIX_EPOCH)
+            .expect("SystemTime set to a time before UNIX EPOCH!");
+        let epoch_seconds = duration_since_epoch.as_secs();
+        config.app_version = epoch_seconds.to_string();
+    } else {
+        // todo need to figure out how to get git commit as the id
+    }
     config
 }
 
@@ -151,54 +167,52 @@ fn validate_config(config: &AppConfig) -> Result<(), String> {
         }
     }
 
+    if config.services.is_empty() {
+        return Err(format!("services requires at least one entry"));
+    }
     for (service_name, service_cfg) in &config.services {
-        if service_cfg.is_empty() {
-            return Err(format!("service '{service_name}' requires at least one entry"));
+        if service_cfg.create_workspace.is_empty() {
+            return Err(format!(
+                "service '{service_name}' requires create_workspace"
+            ));
         }
-        for (service_idx, service_entry) in service_cfg.iter().enumerate() {
-            if service_entry.create_workspace.is_empty() {
+        if service_cfg.build_workspace.is_empty() {
+            return Err(format!(
+                "service '{service_name}' requires build_workspace"
+            ));
+        }
+        if service_cfg.deploy_workspace.is_empty() {
+            return Err(format!(
+                "service '{service_name}' requires deploy_workspace"
+            ));
+        }
+        if service_cfg.environments.is_empty() {
+            return Err(format!(
+                "service '{service_name}' requires environments"
+            ));
+        }
+        for (env_name, env_cfgs) in &service_cfg.environments {
+            config.environments.get(env_name).ok_or_else(|| {
+                format!(
+                    "service '{service_name}' references unknown environment '{env_name}'"
+                )
+            })?;
+            if env_cfgs.is_empty() {
                 return Err(format!(
-                    "service '{service_name}' entry[{service_idx}] requires create_workspace"
+                    "service '{service_name}' environment '{env_name}' requires at least one entry"
                 ));
             }
-            if service_entry.build_workspace.is_empty() {
-                return Err(format!(
-                    "service '{service_name}' entry[{service_idx}] requires build_workspace"
-                ));
-            }
-            if service_entry.deploy_workspace.is_empty() {
-                return Err(format!(
-                    "service '{service_name}' entry[{service_idx}] requires deploy_workspace"
-                ));
-            }
-            if service_entry.environments.is_empty() {
-                return Err(format!(
-                    "service '{service_name}' entry[{service_idx}] requires environments"
-                ));
-            }
-            for (env_name, env_cfgs) in &service_entry.environments {
-                config.environments.get(env_name).ok_or_else(|| {
-                    format!(
-                        "service '{service_name}' entry[{service_idx}] references unknown environment '{env_name}'"
-                    )
-                })?;
-                if env_cfgs.is_empty() {
+            for (env_idx, env_cfg) in env_cfgs.iter().enumerate() {
+                if env_cfg.nodes.is_empty() {
                     return Err(format!(
-                        "service '{service_name}' entry[{service_idx}] environment '{env_name}' requires at least one entry"
+                        "service '{service_name}' environment '{env_name}'[{env_idx}] requires at least one node"
                     ));
                 }
-                for (env_idx, env_cfg) in env_cfgs.iter().enumerate() {
-                    if env_cfg.nodes.is_empty() {
+                for node in &env_cfg.nodes {
+                    if !config.nodes.contains_key(node) {
                         return Err(format!(
-                            "service '{service_name}' entry[{service_idx}] environment '{env_name}'[{env_idx}] requires at least one node"
+                            "service '{service_name}' environment '{env_name}'[{env_idx}] references unknown node '{node}'",
                         ));
-                    }
-                    for node in &env_cfg.nodes {
-                        if !config.nodes.contains_key(node) {
-                            return Err(format!(
-                                "service '{service_name}' entry[{service_idx}] environment '{env_name}'[{env_idx}] references unknown node '{node}'",
-                            ));
-                        }
                     }
                 }
             }

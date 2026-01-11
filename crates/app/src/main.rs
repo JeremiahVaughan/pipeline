@@ -26,13 +26,13 @@ fn main() {
     // websocket threads
     thread::spawn(move || {
         let listener = TcpListener::bind("127.0.0.1:8787").unwrap();
-        let max_users = get_config().max_users;
-        let pool = ThreadPool::new(max_users); 
+        let config = get_config();
+        let pool = ThreadPool::new(config.max_users); 
         for stream in listener.incoming() {
             match stream {
                 Ok(s) => {
                     pool.execute(|| {
-                        handle_websocket_connection(s);
+                        handle_websocket_connection(s, &config.app_version);
                     });
                 }
                 Err(e) => eprintln!("websocket connection from browser failed. {e}"),

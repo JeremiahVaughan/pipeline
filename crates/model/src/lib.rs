@@ -6,7 +6,7 @@
 use r2d2_sqlite::{rusqlite};
 use r2d2_sqlite::rusqlite::{OptionalExtension, named_params};
 use std::fmt::{self, Display, Formatter};
-use db;
+use db::{self, DbPool};
 
 /// Errors that can occur during model operations.
 #[derive(Debug)]
@@ -78,16 +78,23 @@ impl User {
 /// SQLite-backed user model.
 #[derive(Clone)]
 pub struct SqliteUserModel {
+    pool: DbPool,
 }
 
 impl SqliteUserModel {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            pool: db::pool().clone(),
+        }
+    }
+
+    pub fn new_with_pool(pool: DbPool) -> Self {
+        Self { pool }
     }
 
     /// Insert a new user and return the created record.
     pub fn create_user(&self, username: &str, email: &str) -> ModelResult<User> {
-        let conn = db::pool().get()?;
+        let conn = self.pool.get()?;
         conn.execute(
             "INSERT INTO users (username, email) VALUES (:username, :email) \
              ON CONFLICT(username) DO NOTHING;",
@@ -98,8 +105,7 @@ impl SqliteUserModel {
         let id = conn.last_insert_rowid() as u64;
 
         if changes == 0 {
-            return self
-                .find_user_by_username(username)?
+            return find_user_by_username_with_conn(&conn, username)?
                 .ok_or_else(|| rusqlite::Error::QueryReturnedNoRows.into());
         }
 
@@ -108,7 +114,7 @@ impl SqliteUserModel {
 
     /// Fetch a user by id.
     pub fn find_user(&self, id: u64) -> ModelResult<Option<User>> {
-        let conn = db::pool().get()?;
+        let conn = self.pool.get()?;
         conn.prepare_cached("SELECT id, username, email FROM users WHERE id = ?1;")?
             .query_row([id], |row| {
                 Ok(User::new(
@@ -123,18 +129,25 @@ impl SqliteUserModel {
 
     /// Fetch a user by username.
     pub fn find_user_by_username(&self, username: &str) -> ModelResult<Option<User>> {
-        let conn = db::pool().get()?;
-        conn.prepare_cached("SELECT id, username, email FROM users WHERE username = ?1;")?
-            .query_row([username], |row| {
-                Ok(User::new(
-                    row.get::<_, i64>(0)? as u64,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            })
-            .optional()
-            .map_err(Into::into)
+        let conn = self.pool.get()?;
+        find_user_by_username_with_conn(&conn, username)
     }
+}
+
+fn find_user_by_username_with_conn(
+    conn: &rusqlite::Connection,
+    username: &str,
+) -> ModelResult<Option<User>> {
+    conn.prepare_cached("SELECT id, username, email FROM users WHERE username = ?1;")?
+        .query_row([username], |row| {
+            Ok(User::new(
+                row.get::<_, i64>(0)? as u64,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .optional()
+        .map_err(Into::into)
 }
 
 #[cfg(test)]
@@ -163,7 +176,7 @@ mod tests {
             .expect("create table");
 
         drop(connection);
-        let model = SqliteUserModel::new();
+        let model = SqliteUserModel::new_with_pool(pool.clone());
         let created = model
             .create_user("test-user", "test@example.com")
             .expect("create");
@@ -184,7 +197,7 @@ mod tests {
             .expect("create table");
 
         drop(connection);
-        let model = SqliteUserModel::new();
+        let model = SqliteUserModel::new_with_pool(pool.clone());
         let first = model
             .create_user("dupe", "first@example.com")
             .expect("create");

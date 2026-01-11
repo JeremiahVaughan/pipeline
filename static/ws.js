@@ -31,18 +31,39 @@
       startHeartbeat();
     });
 
+
     ws.addEventListener("message", (event) => {
         last_server_contact = Date.now();
-        if (event.data !== "pong") {
-            const ul = document.querySelector('#messages');
-            const li = document.createElement('li');
-            li.textContent = event.data;
-            ul.appendChild(li);
+        if (event.data === "pong") {
+            // last server contact update is what we care about here
+            return
+        }
+
+        const index = event.data.indexOf(":");
+        const event_name = index === -1 ? event.data : event.data.slice(0, index);
+        const event_data = index === -1 ? "" : event.data.slice(index + 1);
+        switch (event_name) {
+            case "ready":
+                // client version update
+                const client_version = document.querySelector('meta[name="app-version"]').content;
+                if (client_version !== event_data) {
+                    window.location.reload();
+                }
+                break;
+            case "new_deployment":
+                const ul = document.querySelector('#messages');
+                const li = document.createElement('li');
+                li.textContent = event.data;
+                ul.appendChild(li);
+                break;
+            default:
+                console.error("server sent unknown event event_name: '%s'. event_data: '%s'", event_name, event_data);
         }
     });
 
     ws.addEventListener("close", (event) => {
       log("closed", event.code, event.reason || "clean close");
+
       stopHeartbeat();
       scheduleReconnect();
     });
@@ -82,11 +103,14 @@
   }
 
   function scheduleReconnect() {
-    clearTimeout(reconnectTimer);
-    attempts += 1;
-    const delay = Math.min(baseReconnectMs * 2 ** attempts, maxReconnectMs);
-    log(`reconnecting in ${delay}ms`);
-    reconnectTimer = setTimeout(connect, delay);
+      clearTimeout(reconnectTimer);
+      let delay = 200; // fast development reloads
+      if (window.location.hostname !== "localhost") {
+          attempts += 1;
+          const delay = Math.min(baseReconnectMs * 2 ** attempts, maxReconnectMs);
+          log(`reconnecting in ${delay}ms`);
+      }
+      reconnectTimer = setTimeout(connect, delay);
   }
 
   function disconnect() {

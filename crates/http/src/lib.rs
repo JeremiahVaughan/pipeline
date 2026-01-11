@@ -1,10 +1,11 @@
 use config::get_config;
 use std::{
     backtrace::Backtrace,
+    collections::HashMap,
     io::{BufRead, BufReader, Write},
     net::TcpStream,
 };
-use view::{get_home, get_not_found};
+use view::{get_landing_page, get_settings_page, get_service_page, get_not_found};
 
 // importing like this is nice because all files end up in the binary and stay in RAM for quick
 // access. Also means you just ship the binary instead of files.
@@ -16,12 +17,24 @@ static ANIMATION_CSS: &[u8] = include_bytes!("../../../static/animation.css");
 // static WASM_HELLO: &[u8] = include_bytes!("../wasm-hello/pkg/wasm_hello.js");
 // static WASM_HELLO_RUST: &[u8] = include_bytes!("../wasm-hello/pkg/wasm_hello_bg.wasm");
 
+pub struct RequestLine {
+    method: String,
+    path: String,
+    version: String,
+}
+
+impl RequestLine {
+    fn as_string(&self) -> String {
+        format!("{} {} {}", self.method, self.path, self.version)
+    }
+}
+
 pub fn handle_http_connection(mut stream: TcpStream) {
     let buf_reader = BufReader::new(&stream);
     let request_line = buf_reader.lines().next();
-    let request_line = match request_line {
+    let (request_line, query_params) = match request_line {
         Some(request_line) => match request_line {
-            Ok(request_line) => request_line,
+            Ok(request_line) => parse_request_line(request_line),
             Err(err) => {
                 println!("error, when reading request line {err}");
                 return;
@@ -32,10 +45,24 @@ pub fn handle_http_connection(mut stream: TcpStream) {
             return;
         }
     };
+    let config = &get_config();
+    let request_line = request_line.as_string();
     let (status_line, contents, content_type, enable_cache): (&str, &[u8], &str, bool) = match &request_line[..] {
         "GET / HTTP/1.1" => (
             "HTTP/1.1 200 OK",
-            &get_home(&get_config().services),
+            &get_landing_page(&config),
+            "text/html; charset=utf-8",
+            false,
+        ),
+        "GET /settings HTTP/1.1" => (
+            "HTTP/1.1 200 OK",
+            &get_settings_page(&config),
+            "text/html; charset=utf-8",
+            false,
+        ),
+        "GET /service HTTP/1.1" => (
+            "HTTP/1.1 200 OK",
+            &get_service_page(query_params, &config),
             "text/html; charset=utf-8",
             false,
         ),
@@ -113,5 +140,69 @@ pub fn handle_http_connection(mut stream: TcpStream) {
             eprintln!("error, when streaming content to client. Error: {}. Stack: {:?}", err, bt);
             return
         }
+    }
+}
+
+fn parse_request_line(request_line: String) -> (RequestLine, HashMap<String, String>) {
+    let mut parts = request_line.split_whitespace();
+    let method = parts.next().unwrap_or_default().to_string();
+    let target = parts.next().unwrap_or_default();
+    let version = parts.next().unwrap_or_default().to_string();
+
+    let (path, query) = match target.split_once('?') {
+        Some((path, query)) => (path, query),
+        None => (target, ""),
+    };
+
+    let request_line = RequestLine {
+        method,
+        path: path.to_string(),
+        version,
+    };
+    let query_params = parse_query_params(query);
+    (request_line, query_params)
+}
+
+fn parse_query_params(query: &str) -> HashMap<String, String> {
+    query
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+        .filter_map(|pair| {
+            let mut parts = pair.splitn(2, '=');
+            let key = parts.next().unwrap_or_default();
+            if key.is_empty() {
+                return None;
+            }
+            let value = parts.next().unwrap_or_default();
+            Some((key.to_string(), value.to_string()))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_request_line_no_query_params() {
+        let rl = "GET / HTTP/1.1".to_string();
+        let (rl, qp) = parse_request_line(rl);
+        assert_eq!(rl.method, "GET");
+        assert_eq!(rl.path, "/");
+        assert_eq!(rl.version, "HTTP/1.1");
+        assert!(qp.is_empty());
+    }
+
+
+    #[test]
+    fn parses_request_line_query_params() {
+        let rl = "GET /settings?name=hello HTTP/1.1".to_string();
+        let (rl, qp) = parse_request_line(rl);
+        assert_eq!(rl.method, "GET");
+        assert_eq!(rl.path, "/settings");
+        assert_eq!(rl.version, "HTTP/1.1");
+        let mut expected = HashMap::new();
+        expected.insert("name".to_string(), "hello".to_string());
+        assert_eq!(qp, expected);
     }
 }
