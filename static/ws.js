@@ -105,10 +105,15 @@
   function scheduleReconnect() {
       clearTimeout(reconnectTimer);
       let delay = 200; // fast development reloads
-      if (window.location.hostname !== "localhost") {
-          attempts += 1;
-          const delay = Math.min(baseReconnectMs * 2 ** attempts, maxReconnectMs);
-          log(`reconnecting in ${delay}ms`);
+      switch (window.location.hostname) {
+          case "localhost":
+              break;
+          case "127.0.0.1":
+              break;
+          default:
+              attempts += 1;
+              delay = Math.min(baseReconnectMs * 2 ** attempts, maxReconnectMs);
+              log(`reconnecting in ${delay}ms`);
       }
       reconnectTimer = setTimeout(connect, delay);
   }
