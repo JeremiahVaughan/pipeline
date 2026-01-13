@@ -14,6 +14,9 @@ static FIRE_TRUCK_SVG: &[u8] = include_bytes!("../../../static/firetruck.svg");
 static AMBULANCE_TRUCK_SVG: &[u8] = include_bytes!("../../../static/ambulance.svg");
 static POLICE_SVG: &[u8] = include_bytes!("../../../static/police.svg");
 static ANIMATION_CSS: &[u8] = include_bytes!("../../../static/animation.css");
+static LANDING_PAGE_CSS: &[u8] = include_bytes!("../../../static/landing_page.css");
+static SETTINGS_PAGE_CSS: &[u8] = include_bytes!("../../../static/settings_page.css");
+static SERVICE_PAGE_CSS: &[u8] = include_bytes!("../../../static/service_page.css");
 // static WASM_HELLO: &[u8] = include_bytes!("../wasm-hello/pkg/wasm_hello.js");
 // static WASM_HELLO_RUST: &[u8] = include_bytes!("../wasm-hello/pkg/wasm_hello_bg.wasm");
 
@@ -70,6 +73,24 @@ pub fn handle_http_connection(mut stream: TcpStream) {
             "HTTP/1.1 200 OK",
             CUSTOM_HTMX_JS,
             "application/javascript; charset=utf-8",
+            true,
+        ),
+        "GET /static/landing_page.css HTTP/1.1" => (
+            "HTTP/1.1 200 OK",
+            LANDING_PAGE_CSS,
+            "text/css",
+            true,
+        ),
+        "GET /static/settings_page.css HTTP/1.1" => (
+            "HTTP/1.1 200 OK",
+            SETTINGS_PAGE_CSS,
+            "text/css",
+            true,
+        ),
+        "GET /static/service_page.css HTTP/1.1" => (
+            "HTTP/1.1 200 OK",
+            SERVICE_PAGE_CSS,
+            "text/css",
             true,
         ),
         "GET /static/animation.css HTTP/1.1" => (

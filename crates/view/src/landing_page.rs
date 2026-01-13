@@ -2,7 +2,6 @@ use hypertext::{ Raw, maud, prelude::* };
 use config::AppConfig;
 
 static WEBSOCKET_CLIENT: &str = include_str!("../../../static/ws.js"); 
-static LANDING_PAGE_CSS: &str = include_str!("../../../static/landing_page.css"); 
 static LANDING_PAGE_JS: &str = include_str!("../../../static/landing_page.js"); 
 
 pub fn get_landing_page(config: &AppConfig) -> Vec<u8> {
@@ -13,33 +12,33 @@ pub fn get_landing_page(config: &AppConfig) -> Vec<u8> {
                 title { "Axe" }
                 meta name="app-version" content=(&config.app_version);
                 script type="module" src="/static/custom_htmx.js" defer {}
-                style {
-                    (Raw::dangerously_create(LANDING_PAGE_CSS))
-                }
+                link rel="stylesheet" href="/static/landing_page.css";
                 script {
                     (Raw::dangerously_create(WEBSOCKET_CLIENT))
                 }
                 link rel="stylesheet" href="/static/animation.css";
             }
-            body {
-                p { "Services" }
-                img.firetruck src="/static/firetruck.svg" loading="lazy" alt="firetruck" width="96" height="96";
-                img.ambulance src="/static/ambulance.svg" loading="lazy" alt="ambulance" width="96" height="96";
-                img.police src="/static/police.svg" loading="lazy" alt="police" width="50" height="50";
+            body data-page="landing" {
+                div #app data-page="landing" data-css="/static/landing_page.css" {
+                    p { "Services" }
+                    img.firetruck src="/static/firetruck.svg" loading="lazy" alt="firetruck" width="96" height="96";
+                    img.ambulance src="/static/ambulance.svg" loading="lazy" alt="ambulance" width="96" height="96";
+                    img.police src="/static/police.svg" loading="lazy" alt="police" width="50" height="50";
 
-                form #publish-form {
-                    input #search
-                          type="text" 
-                          placeholder="search...";
-                }
-                script {
-                    (Raw::dangerously_create(LANDING_PAGE_JS))
-                }
-                ul #messages {
-                    @for (name, _) in &config.services {
-                        li.item {
-                            button {
-                                (name)
+                    form #publish-form {
+                        input #search
+                              type="text" 
+                              placeholder="search...";
+                    }
+                    script {
+                        (Raw::dangerously_create(LANDING_PAGE_JS))
+                    }
+                    ul #messages {
+                        @for (name, _) in &config.services {
+                            li.item {
+                                button {
+                                    (name)
+                                }
                             }
                         }
                     }

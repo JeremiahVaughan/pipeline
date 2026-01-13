@@ -3,7 +3,6 @@ use config::AppConfig;
 use std::collections::HashMap;
 
 static WEBSOCKET_CLIENT: &str = include_str!("../../../static/ws.js"); 
-static SERVICE_PAGE_CSS: &str = include_str!("../../../static/service_page.css"); 
 
 pub fn get_service_page(query_params: HashMap<String, String>, config: &AppConfig) -> Vec<u8> {
     let service_name = match query_params.get("name") {
@@ -18,33 +17,32 @@ pub fn get_service_page(query_params: HashMap<String, String>, config: &AppConfi
                 meta name="app-version" content=(&config.app_version);
                 script type="module" src="/static/custom_htmx.js" defer {}
                 link rel="stylesheet" href="/static/animation.css";
-
-                style {
-                    (Raw::dangerously_create(SERVICE_PAGE_CSS))
-                }
+                link rel="stylesheet" href="/static/service_page.css";
                 script {
                     (Raw::dangerously_create(WEBSOCKET_CLIENT))
                 }
             }
-            body {
-                h1 { "Service " (service_name) }
-                img.firetruck src="/static/firetruck.svg" loading="lazy" alt="firetruck" width="96" height="96";
-                img.ambulance src="/static/ambulance.svg" loading="lazy" alt="ambulance" width="96" height="96";
-                img.police src="/static/police.svg" loading="lazy" alt="police" width="50" height="50";
+            body data-page="service" {
+                div #app data-page="service" data-css="/static/service_page.css" {
+                    h1 { "Service " (service_name) }
+                    img.firetruck src="/static/firetruck.svg" loading="lazy" alt="firetruck" width="96" height="96";
+                    img.ambulance src="/static/ambulance.svg" loading="lazy" alt="ambulance" width="96" height="96";
+                    img.police src="/static/police.svg" loading="lazy" alt="police" width="50" height="50";
 
-                form #publish-form {
-                    label {
-                        "Message:"
-                        input #publish-body 
-                              type="text" 
-                              placeholder="Write a message for subject 'demo'";
+                    form #publish-form {
+                        label {
+                            "Message:"
+                            input #publish-body 
+                                  type="text" 
+                                  placeholder="Write a message for subject 'demo'";
+                        }
+                        button type="submit" {
+                            "Publish"
+                        }
                     }
-                    button type="submit" {
-                        "Publish"
+                    h2 { "Messages on 'demo'" }
+                    ul #messages {
                     }
-                }
-                h2 { "Messages on 'demo'" }
-                ul #messages {
                 }
 
                 // h1 { "Rust WASM demo" }

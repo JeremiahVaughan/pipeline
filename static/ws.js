@@ -11,6 +11,7 @@
   const baseReconnectMs = 500;
   const maxReconnectMs = randomInt(7000, 10000);
 
+  const loadedCss = new Set();
   let ws;
   let reconnectTimer;
   let heartbeatTimer;
@@ -19,6 +20,52 @@
   let last_contact_timeout = 120000;
 
   const log = (...args) => console.log("[ws-demo]", ...args);
+
+  function ensurePageCss(page, href) {
+    if (!href) return;
+    if (loadedCss.has(href)) return;
+    if (document.querySelector(`link[data-page="${page}"][href="${href}"]`)) {
+      loadedCss.add(href);
+      return;
+    }
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = href;
+    link.dataset.page = page || "unknown";
+    document.head.appendChild(link);
+    loadedCss.add(href);
+  }
+
+  function syncPageAssets() {
+    const app = document.getElementById("app");
+    if (!app) return;
+    const page = app.dataset.page || "";
+    const css = app.dataset.css || "";
+    if (page) {
+      document.body.dataset.page = page;
+    }
+    ensurePageCss(page, css);
+  }
+
+  function watchPageAssets() {
+    syncPageAssets();
+    let scheduled = false;
+    const scheduleSync = () => {
+      if (scheduled) return;
+      scheduled = true;
+      requestAnimationFrame(() => {
+        scheduled = false;
+        syncPageAssets();
+      });
+    };
+    const observer = new MutationObserver(scheduleSync);
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["data-page", "data-css"],
+    });
+  }
 
   function connect() {
       clearTimeout(reconnectTimer);
@@ -134,6 +181,11 @@
   }
 
   connect();
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", watchPageAssets);
+  } else {
+    watchPageAssets();
+  }
 
   window.demoWebSocket = { send, disconnect };
 

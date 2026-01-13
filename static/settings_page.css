@@ -1,28 +1,27 @@
-h1 {
+body[data-page="settings"] h1 {
     color: #0000ff;
 }
 
-#messages {
+body[data-page="settings"] #messages {
     display: flex;
     justify-content: space-around;
 }
 
-.ci {
+body[data-page="settings"] .ci {
     display: flex;
     justify-content: space-around;
 }
 
-.env {
+body[data-page="settings"] .env {
     display: flex;
     flex-direction: column;
 }
 
-.item {
+body[data-page="settings"] .item {
     border: solid 1px black;
     padding: 2rem;
 }
 
-body {
+body[data-page="settings"] {
     overflow-x: hidden;
 }
-

@@ -1,11 +1,10 @@
-h1 {
+body[data-page="landing"] h1 {
     color: #ff0000;
 }
-button {
+body[data-page="landing"] button {
     padding: .2rem;
 }
 
-body {
+body[data-page="landing"] {
     overflow-x: hidden;
 }
-
