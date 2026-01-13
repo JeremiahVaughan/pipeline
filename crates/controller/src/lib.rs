@@ -25,6 +25,7 @@ impl UserController {
 pub enum AppEvent {
     Ping,
     Deploy(String),
+    SearchServices(String),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -44,6 +45,10 @@ pub fn parse_event(text: &str) -> Result<AppEvent, ParseEventError> {
         }
         "deploy" => match rest {
             Some(service) if !service.is_empty() => Ok(AppEvent::Deploy(service.to_string())),
+            _ => Err(ParseEventError::MissingArg),
+        },
+        "search_services" => match rest {
+            Some(service) if !service.is_empty() => Ok(AppEvent::SearchServices(service.to_string())),
             _ => Err(ParseEventError::MissingArg),
         },
         _ => Err(ParseEventError::UnknownKind),

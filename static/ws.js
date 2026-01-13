@@ -21,57 +21,64 @@
   const log = (...args) => console.log("[ws-demo]", ...args);
 
   function connect() {
-    clearTimeout(reconnectTimer);
-    ws = new WebSocket(url);
+      clearTimeout(reconnectTimer);
+      ws = new WebSocket(url);
 
-    ws.addEventListener("open", () => {
-      last_server_contact = Date.now();
-      log("connected", url);
-      attempts = 0;
-      startHeartbeat();
-    });
-
-
-    ws.addEventListener("message", (event) => {
+      ws.addEventListener("open", () => {
         last_server_contact = Date.now();
-        if (event.data === "pong") {
-            // last server contact update is what we care about here
-            return
-        }
+        log("connected", url);
+        attempts = 0;
+        startHeartbeat();
+      });
 
-        const index = event.data.indexOf(":");
-        const event_name = index === -1 ? event.data : event.data.slice(0, index);
-        const event_data = index === -1 ? "" : event.data.slice(index + 1);
-        switch (event_name) {
-            case "ready":
-                // client version update
-                const client_version = document.querySelector('meta[name="app-version"]').content;
-                if (client_version !== event_data) {
-                    window.location.reload();
-                }
-                break;
-            case "new_deployment":
-                const ul = document.querySelector('#messages');
-                const li = document.createElement('li');
-                li.textContent = event.data;
-                ul.appendChild(li);
-                break;
-            default:
-                console.error("server sent unknown event event_name: '%s'. event_data: '%s'", event_name, event_data);
-        }
-    });
 
-    ws.addEventListener("close", (event) => {
-      log("closed", event.code, event.reason || "clean close");
+      ws.addEventListener("message", (event) => {
+          last_server_contact = Date.now();
+          if (event.data === "pong") {
+              // last server contact update is what we care about here
+              return
+          }
 
-      stopHeartbeat();
-      scheduleReconnect();
-    });
+          const index = event.data.indexOf(":");
+          const event_name = index === -1 ? event.data : event.data.slice(0, index);
+          const event_data = index === -1 ? "" : event.data.slice(index + 1);
+          switch (event_name) {
+              case "ready":
+                  // client version update
+                  const client_version = document.querySelector('meta[name="app-version"]').content;
+                  if (client_version !== event_data) {
+                      window.location.reload();
+                  }
+                  break;
+              case "new_deployment":
+                  const ul = document.querySelector('#messages');
+                  const li = document.createElement('li');
+                  li.textContent = event.data;
+                  ul.appendChild(li);
+                  break;
+              default:
+                  console.error("server sent unknown event event_name: '%s'. event_data: '%s'", event_name, event_data);
+          }
+      });
 
-    ws.addEventListener("error", (event) => {
-      log("socket error", event);
-      ws.close();
-    });
+      ws.addEventListener("close", (event) => {
+        log("closed", event.code, event.reason || "clean close");
+
+        stopHeartbeat();
+        scheduleReconnect();
+      });
+
+      ws.addEventListener("error", (event) => {
+        log("socket error", event);
+        ws.close();
+      });
+
+      window.WS = {
+          send(message) {
+              ws.send(message);
+          }
+      }
+      Object.freeze(window.WS);
   }
 
   function send(payload) {

@@ -231,6 +231,10 @@ fn handle_app_message(
     // access to control frames
     match parse_event(&msg.to_string()) {
         Ok(AppEvent::Ping) => outbox.push_back(Message::Text("pong".into())),
+        Ok(AppEvent::SearchServices(s)) => {
+            println!("todo remove searching service {}", s);
+
+        }
         Ok(AppEvent::Deploy(s)) => {
             outbox.push_back(Message::Text(format!("new_deployment: {}", s).into()));
             if deploy.is_some() {
