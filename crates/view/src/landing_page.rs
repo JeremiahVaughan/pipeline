@@ -4,6 +4,15 @@ use config::AppConfig;
 static WEBSOCKET_CLIENT: &str = include_str!("../../../static/ws.js"); 
 
 pub fn get_landing_app(config: &AppConfig) -> String {
+    get_landing_app_with_services(config.services.keys().map(String::as_str), None)
+}
+
+pub fn get_landing_app_with_services<'a, I>(services: I, search_value: Option<&str>) -> String
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let search_value = search_value.unwrap_or("");
+    let services: Vec<&'a str> = services.into_iter().collect();
     maud! {
         div #app data-page="landing" data-css="/static/landing_page.css" data-js="/static/landing_page.js" {
             p { "Services" }
@@ -14,10 +23,11 @@ pub fn get_landing_app(config: &AppConfig) -> String {
             form #publish-form {
                 input #search
                       type="text" 
+                      value=(search_value)
                       placeholder="search...";
             }
             ul #messages {
-                @for (name, _) in &config.services {
+                @for name in &services {
                     li.item {
                         a.item-link href=(format!("/service?name={}", name)) {
                             (name)

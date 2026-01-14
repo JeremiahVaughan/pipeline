@@ -3,7 +3,7 @@
 use config::AppConfig;
 use model::{ModelResult, SqliteUserModel, User};
 use std::collections::HashMap;
-use view::{get_landing_app, get_landing_page, get_settings_app, get_settings_page, get_service_app, get_service_page, get_not_found, get_not_found_app};
+use view::{get_landing_app, get_landing_app_with_services, get_landing_page, get_settings_app, get_settings_page, get_service_app, get_service_page, get_not_found, get_not_found_app};
 
 /// Coordinates model operations for the view layer.
 pub struct UserController {
@@ -112,4 +112,56 @@ pub fn parse_query_params(query: &str) -> HashMap<String, String> {
             Some((key.to_string(), value.to_string()))
         })
         .collect()
+}
+
+pub fn get_filtered_landing_app(query: &str, config: &AppConfig) -> String {
+    let query = query.trim();
+    if query.is_empty() {
+        return get_landing_app(config);
+    }
+
+    let query_lower = query.to_lowercase();
+    let mut matches: Vec<(usize, &String)> = config
+        .services
+        .keys()
+        .filter_map(|name| {
+            let score = fuzzy_score(&query_lower, &name.to_lowercase())?;
+            Some((score, name))
+        })
+        .collect();
+
+    matches.sort_by(|(score_a, name_a), (score_b, name_b)| {
+        score_a.cmp(score_b).then_with(|| name_a.cmp(name_b))
+    });
+
+    get_landing_app_with_services(
+        matches.into_iter().map(|(_, name)| name.as_str()),
+        Some(query),
+    )
+}
+
+fn fuzzy_score(needle: &str, haystack: &str) -> Option<usize> {
+    let mut score = 0;
+    let mut last_match_end = 0;
+    let mut hay_iter = haystack.char_indices();
+
+    for needle_ch in needle.chars() {
+        let mut found = None;
+        while let Some((idx, hay_ch)) = hay_iter.next() {
+            if hay_ch == needle_ch {
+                found = Some((idx, hay_ch.len_utf8()));
+                break;
+            }
+        }
+        match found {
+            Some((idx, len)) => {
+                score += idx.saturating_sub(last_match_end);
+                last_match_end = idx + len;
+            }
+            None => return None,
+        }
+    }
+
+    score += haystack.len().saturating_sub(last_match_end);
+    Some(score)
 }

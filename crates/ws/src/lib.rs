@@ -236,7 +236,8 @@ fn handle_app_message(
     match parse_event(&msg.to_string()) {
         Ok(AppEvent::Ping) => outbox.push_back(Message::Text("pong".into())),
         Ok(AppEvent::SearchServices(s)) => {
-            println!("todo remove searching service {}", s);
+            let html = controller::get_filtered_landing_app(&s, config);
+            outbox.push_back(Message::Text(format!("patch:{}", html).into()));
         }
         Ok(AppEvent::Navigate(path)) => {
             let (path_only, query) = split_path_query(&path);
