@@ -32,7 +32,7 @@ fn main() {
             match stream {
                 Ok(s) => {
                     pool.execute(|| {
-                        handle_websocket_connection(s, &config.app_version);
+                        handle_websocket_connection(s);
                     });
                 }
                 Err(e) => eprintln!("websocket connection from browser failed. {e}"),
@@ -54,7 +54,6 @@ fn main() {
         }
     }
 }
-
 
 
 

@@ -4,11 +4,40 @@ use std::collections::HashMap;
 
 static WEBSOCKET_CLIENT: &str = include_str!("../../../static/ws.js"); 
 
-pub fn get_service_page(query_params: HashMap<String, String>, config: &AppConfig) -> Vec<u8> {
+pub fn get_service_app(query_params: HashMap<String, String>) -> String {
     let service_name = match query_params.get("name") {
-        Some(sn) => sn,
+        Some(sn) => sn.as_str(),
         None => "unknown", // todo handle error with validation and feedback to user
     };
+    maud! {
+        div #app data-page="service" data-css="/static/service_page.css" {
+            h1 { "Service " (service_name) }
+            img.firetruck src="/static/firetruck.svg" loading="lazy" alt="firetruck" width="96" height="96";
+            img.ambulance src="/static/ambulance.svg" loading="lazy" alt="ambulance" width="96" height="96";
+            img.police src="/static/police.svg" loading="lazy" alt="police" width="50" height="50";
+
+            form #publish-form {
+                label {
+                    "Message:"
+                    input #publish-body 
+                          type="text" 
+                          placeholder="Write a message for subject 'demo'";
+                }
+                button type="submit" {
+                    "Publish"
+                }
+            }
+            h2 { "Messages on 'demo'" }
+            ul #messages {
+            }
+        }
+    }
+    .render()
+    .into_inner()
+}
+
+pub fn get_service_page(query_params: HashMap<String, String>, config: &AppConfig) -> Vec<u8> {
+    let app_html = get_service_app(query_params.clone());
     maud! {
         html {
             head {
@@ -23,27 +52,7 @@ pub fn get_service_page(query_params: HashMap<String, String>, config: &AppConfi
                 }
             }
             body data-page="service" {
-                div #app data-page="service" data-css="/static/service_page.css" {
-                    h1 { "Service " (service_name) }
-                    img.firetruck src="/static/firetruck.svg" loading="lazy" alt="firetruck" width="96" height="96";
-                    img.ambulance src="/static/ambulance.svg" loading="lazy" alt="ambulance" width="96" height="96";
-                    img.police src="/static/police.svg" loading="lazy" alt="police" width="50" height="50";
-
-                    form #publish-form {
-                        label {
-                            "Message:"
-                            input #publish-body 
-                                  type="text" 
-                                  placeholder="Write a message for subject 'demo'";
-                        }
-                        button type="submit" {
-                            "Publish"
-                        }
-                    }
-                    h2 { "Messages on 'demo'" }
-                    ul #messages {
-                    }
-                }
+                (Raw::dangerously_create(&app_html))
 
                 // h1 { "Rust WASM demo" }
                 // pre #out {}

@@ -2,9 +2,37 @@ use hypertext::{ Raw, maud, prelude::* };
 use config::AppConfig;
 
 static WEBSOCKET_CLIENT: &str = include_str!("../../../static/ws.js"); 
-static LANDING_PAGE_JS: &str = include_str!("../../../static/landing_page.js"); 
+
+pub fn get_landing_app(config: &AppConfig) -> String {
+    maud! {
+        div #app data-page="landing" data-css="/static/landing_page.css" data-js="/static/landing_page.js" {
+            p { "Services" }
+            img.firetruck src="/static/firetruck.svg" loading="lazy" alt="firetruck" width="96" height="96";
+            img.ambulance src="/static/ambulance.svg" loading="lazy" alt="ambulance" width="96" height="96";
+            img.police src="/static/police.svg" loading="lazy" alt="police" width="50" height="50";
+
+            form #publish-form {
+                input #search
+                      type="text" 
+                      placeholder="search...";
+            }
+            ul #messages {
+                @for (name, _) in &config.services {
+                    li.item {
+                        a.item-link href=(format!("/service?name={}", name)) {
+                            (name)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    .render()
+    .into_inner()
+}
 
 pub fn get_landing_page(config: &AppConfig) -> Vec<u8> {
+    let app_html = get_landing_app(config);
     maud! {
         html {
             head {
@@ -19,30 +47,7 @@ pub fn get_landing_page(config: &AppConfig) -> Vec<u8> {
                 link rel="stylesheet" href="/static/animation.css";
             }
             body data-page="landing" {
-                div #app data-page="landing" data-css="/static/landing_page.css" {
-                    p { "Services" }
-                    img.firetruck src="/static/firetruck.svg" loading="lazy" alt="firetruck" width="96" height="96";
-                    img.ambulance src="/static/ambulance.svg" loading="lazy" alt="ambulance" width="96" height="96";
-                    img.police src="/static/police.svg" loading="lazy" alt="police" width="50" height="50";
-
-                    form #publish-form {
-                        input #search
-                              type="text" 
-                              placeholder="search...";
-                    }
-                    script {
-                        (Raw::dangerously_create(LANDING_PAGE_JS))
-                    }
-                    ul #messages {
-                        @for (name, _) in &config.services {
-                            li.item {
-                                button {
-                                    (name)
-                                }
-                            }
-                        }
-                    }
-                }
+                (Raw::dangerously_create(&app_html))
 
                 // h1 { "Rust WASM demo" }
                 // pre #out {}

@@ -1,13 +1,13 @@
 //! View helpers for rendering model data to text.
 
 pub mod landing_page;
-pub use landing_page::get_landing_page;
+pub use landing_page::{get_landing_page, get_landing_app};
 pub mod settings_page;
-pub use settings_page::get_settings_page;
+pub use settings_page::{get_settings_page, get_settings_app};
 pub mod service_page;
-pub use service_page::get_service_page;
+pub use service_page::{get_service_page, get_service_app};
 pub mod not_found;
-pub use not_found::get_not_found;
+pub use not_found::{get_not_found, get_not_found_app};
 
 use model::User;
 

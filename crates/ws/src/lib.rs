@@ -1,4 +1,5 @@
-use controller::{AppEvent, ParseEventError, parse_event};
+use controller::{AppEvent, ParseEventError, UiMode, UiResult, handle_nav, parse_event, parse_query_params};
+use config::get_config;
 use std::{
     backtrace::Backtrace,
     collections::VecDeque,
@@ -16,7 +17,8 @@ const SOCKET: Token = Token(0);
 const STDOUT: Token = Token(2);
 const STDERR: Token = Token(3);
 
-pub fn handle_websocket_connection(stream: TcpStream, app_version: &String) {
+pub fn handle_websocket_connection(stream: TcpStream) {
+    let config = get_config();
     let websocket = accept(stream);
     let mut websocket = match websocket {
         Ok(w) => w,
@@ -61,7 +63,7 @@ pub fn handle_websocket_connection(stream: TcpStream, app_version: &String) {
         return
     }
 
-    let ready_message = format!("ready:{}", app_version);
+    let ready_message = format!("ready:{}", config.app_version);
     let mut outbox: VecDeque<Message> = VecDeque::from([Message::Text(ready_message.into())]);
     let mut deploy: Option<DeployChild> = None;
     let mut want_write = false;
@@ -119,14 +121,15 @@ pub fn handle_websocket_connection(stream: TcpStream, app_version: &String) {
                                             return
                                         }
                                         other => {
-                                            handle_app_message(
-                                                &mut poll,
-                                                &mut outbox,
-                                                &mut deploy,
-                                                &mut socket_source,
-                                                other,
-                                                &mut want_write,
-                                            );
+                                                handle_app_message(
+                                                    &mut poll,
+                                                    &mut outbox,
+                                                    &mut deploy,
+                                                    &mut socket_source,
+                                                    other,
+                                                    &mut want_write,
+                                                    config,
+                                                );
                                         }
                                     }
                                 }
@@ -226,6 +229,7 @@ fn handle_app_message(
     socket_source: &mut SourceFd,
     msg: Message,
     want_write: &mut bool,
+    config: &'static config::AppConfig,
 ) {
     // custom ping / pong started by client since the client doesn't know when it can reconnect due to no
     // access to control frames
@@ -233,7 +237,22 @@ fn handle_app_message(
         Ok(AppEvent::Ping) => outbox.push_back(Message::Text("pong".into())),
         Ok(AppEvent::SearchServices(s)) => {
             println!("todo remove searching service {}", s);
-
+        }
+        Ok(AppEvent::Navigate(path)) => {
+            let (path_only, query) = split_path_query(&path);
+            let query_params = parse_query_params(query);
+            match handle_nav(path_only, query_params, config, UiMode::Patch) {
+                UiResult::Patch(html) => {
+                    outbox.push_back(Message::Text(format!("patch:{}", html).into()));
+                    outbox.push_back(Message::Text(format!("location:{}", path).into()));
+                }
+                UiResult::Redirect(location) => {
+                    outbox.push_back(Message::Text(format!("location:{}", location).into()));
+                }
+                UiResult::FullHtml(_) | UiResult::NotFound(_) => {
+                    outbox.push_back(Message::Text("error: invalid navigation result".into()));
+                }
+            }
         }
         Ok(AppEvent::Deploy(s)) => {
             outbox.push_back(Message::Text(format!("new_deployment: {}", s).into()));
@@ -263,6 +282,13 @@ fn handle_app_message(
     if *want_write != write_work_needed {
         *want_write = write_work_needed;
         let _ = update_socket_interest(poll, socket_source, *want_write);
+    }
+}
+
+fn split_path_query(path: &str) -> (&str, &str) {
+    match path.split_once('?') {
+        Some((path, query)) => (path, query),
+        None => (path, ""),
     }
 }
 

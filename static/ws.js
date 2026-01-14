@@ -12,6 +12,7 @@
   const maxReconnectMs = randomInt(7000, 10000);
 
   const loadedCss = new Set();
+  const loadedScripts = new Set();
   let ws;
   let reconnectTimer;
   let heartbeatTimer;
@@ -36,15 +37,63 @@
     loadedCss.add(href);
   }
 
+  function ensurePageScript(page, src) {
+    if (!src) return;
+    if (loadedScripts.has(src)) return;
+    if (document.querySelector(`script[data-page="${page}"][src="${src}"]`)) {
+      loadedScripts.add(src);
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = src;
+    script.defer = true;
+    script.dataset.page = page || "unknown";
+    script.addEventListener("load", () => {
+      loadedScripts.add(src);
+      mountCurrentPage();
+    });
+    document.head.appendChild(script);
+  }
+
+  function mountCurrentPage() {
+    const app = document.getElementById("app");
+    if (!app) return;
+    const page = app.dataset.page || "";
+    const mount = window.pageMounts && window.pageMounts[page];
+    if (typeof mount === "function") {
+      mount(app);
+    }
+    setupPublishForm();
+  }
+
+  function setupPublishForm() {
+    const form = document.querySelector("#publish-form");
+    const input = document.querySelector("#publish-body");
+    if (!form || !input || form.dataset.bound === "true") {
+      return;
+    }
+    form.dataset.bound = "true";
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const value = input.value.trim();
+      if (!value) return;
+      send(value);
+      input.value = "";
+    });
+  }
+
   function syncPageAssets() {
     const app = document.getElementById("app");
     if (!app) return;
     const page = app.dataset.page || "";
     const css = app.dataset.css || "";
+    const js = app.dataset.js || "";
     if (page) {
       document.body.dataset.page = page;
     }
     ensurePageCss(page, css);
+    ensurePageScript(page, js);
+    mountCurrentPage();
   }
 
   function watchPageAssets() {
@@ -97,6 +146,14 @@
                       window.location.reload();
                   }
                   break;
+              case "patch":
+                  applyPatch(event_data);
+                  break;
+              case "location":
+                  if (event_data) {
+                      history.pushState({}, "", event_data);
+                  }
+                  break;
               case "new_deployment":
                   const ul = document.querySelector('#messages');
                   const li = document.createElement('li');
@@ -126,6 +183,44 @@
           }
       }
       Object.freeze(window.WS);
+  }
+
+  function applyPatch(html) {
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = html;
+    const next = wrapper.querySelector("#app");
+    const current = document.getElementById("app");
+    if (next && current) {
+      current.replaceWith(next);
+      syncPageAssets();
+      return;
+    }
+    if (current) {
+      current.innerHTML = html;
+    }
+    syncPageAssets();
+  }
+
+  function navigateTo(path) {
+    if (!path) return;
+    send(`navigate:${path}`);
+  }
+
+  function interceptLinks() {
+    document.addEventListener("click", (event) => {
+      const anchor = event.target.closest("a");
+      if (!anchor) return;
+      if (anchor.target || anchor.hasAttribute("download")) return;
+      const url = new URL(anchor.href, window.location.href);
+      if (url.origin !== window.location.origin) return;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      event.preventDefault();
+      navigateTo(url.pathname + url.search);
+    });
+    window.addEventListener("popstate", () => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      navigateTo(window.location.pathname + window.location.search);
+    });
   }
 
   function send(payload) {
@@ -181,6 +276,7 @@
   }
 
   connect();
+  interceptLinks();
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", watchPageAssets);
   } else {
@@ -188,16 +284,4 @@
   }
 
   window.demoWebSocket = { send, disconnect };
-
-  const form = document.querySelector("#publish-form");
-  const input = document.querySelector("#publish-body");
-  if (form && input) {
-    form.addEventListener("submit", (event) => {
-      event.preventDefault();
-      const value = input.value.trim();
-      if (!value) return;
-      send(value);
-      input.value = "";
-    });
-  }
 })();

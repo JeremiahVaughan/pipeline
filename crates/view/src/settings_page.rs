@@ -3,7 +3,70 @@ use config::AppConfig;
 
 static WEBSOCKET_CLIENT: &str = include_str!("../../../static/ws.js"); 
 
-pub fn get_settings_page(config: &'static AppConfig) -> Vec<u8> {
+pub fn get_settings_app(config: &AppConfig) -> String {
+    maud! {
+        div #app data-page="settings" data-css="/static/settings_page.css" {
+            h1 { "settings" }
+            img.firetruck src="/static/firetruck.svg" loading="lazy" alt="firetruck" width="96" height="96";
+            img.ambulance src="/static/ambulance.svg" loading="lazy" alt="ambulance" width="96" height="96";
+            img.police src="/static/police.svg" loading="lazy" alt="police" width="50" height="50";
+
+            h2 { "Services" }
+            ul {
+                @for (name, _) in &config.services {
+                    li {
+                        (name)
+                    }
+                }
+            }
+
+            h2 { "Nodes" }
+            div #messages {
+                @for (name, node_config) in &config.nodes {
+                    div.item {
+                        div {
+                            (name)
+                        }
+                        div {
+                            (node_config.host_name)
+                        }
+                    }
+                }
+            }
+
+            h2 { "CI Nodes" }
+            div.ci {
+                @for name in &config.ci.nodes {
+                    div.item {
+                        (name)
+                    }
+                }
+            }
+
+            h2 { "Environments" }
+            div.env {
+                @for (name, env_config) in &config.environments {
+                    div.item {
+                        (name) br; br;
+                        @for node_name in &env_config.nodes {
+                            div {
+                                "nodes:"
+                            }
+                            div.item {
+                                (node_name)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    .render()
+    .into_inner()
+}
+
+pub fn get_settings_page(config: &AppConfig) -> Vec<u8> {
+    let app_html = get_settings_app(config);
     maud! {
         html {
             head {
@@ -15,61 +78,7 @@ pub fn get_settings_page(config: &'static AppConfig) -> Vec<u8> {
                 link rel="stylesheet" href="/static/animation.css";
             }
             body data-page="settings" {
-                div #app data-page="settings" data-css="/static/settings_page.css" {
-                    h1 { "settings" }
-                    img.firetruck src="/static/firetruck.svg" loading="lazy" alt="firetruck" width="96" height="96";
-                    img.ambulance src="/static/ambulance.svg" loading="lazy" alt="ambulance" width="96" height="96";
-                    img.police src="/static/police.svg" loading="lazy" alt="police" width="50" height="50";
-
-                    h2 { "Services" }
-                    ul {
-                        @for (name, _) in &config.services {
-                            li {
-                                (name)
-                            }
-                        }
-                    }
-
-                    h2 { "Nodes" }
-                    div #messages {
-                        @for (name, node_config) in &config.nodes {
-                            div.item {
-                                div {
-                                    (name)
-                                }
-                                div {
-                                    (node_config.host_name)
-                                }
-                            }
-                        }
-                    }
-
-                    h2 { "CI Nodes" }
-                    div.ci {
-                        @for name in &config.ci.nodes {
-                            div.item {
-                                (name)
-                            }
-                        }
-                    }
-
-                    h2 { "Environments" }
-                    div.env {
-                        @for (name, env_config) in &config.environments {
-                            div.item {
-                                (name) br; br;
-                                @for node_name in &env_config.nodes {
-                                    div {
-                                        "nodes:"
-                                    }
-                                    div.item {
-                                        (node_name)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                (Raw::dangerously_create(&app_html))
 
 
                 // h1 { "Rust WASM demo" }

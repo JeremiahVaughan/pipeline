@@ -1,12 +1,11 @@
 use config::get_config;
+use controller::{handle_nav, parse_query_params, UiMode, UiResult};
 use std::{
     backtrace::Backtrace,
     collections::HashMap,
     io::{BufRead, BufReader, Write},
     net::TcpStream,
 };
-use view::{get_landing_page, get_settings_page, get_service_page, get_not_found};
-
 // importing like this is nice because all files end up in the binary and stay in RAM for quick
 // access. Also means you just ship the binary instead of files.
 static CUSTOM_HTMX_JS: &[u8] = include_bytes!("../../../static/custom_htmx.js");
@@ -15,8 +14,10 @@ static AMBULANCE_TRUCK_SVG: &[u8] = include_bytes!("../../../static/ambulance.sv
 static POLICE_SVG: &[u8] = include_bytes!("../../../static/police.svg");
 static ANIMATION_CSS: &[u8] = include_bytes!("../../../static/animation.css");
 static LANDING_PAGE_CSS: &[u8] = include_bytes!("../../../static/landing_page.css");
+static LANDING_PAGE_JS: &[u8] = include_bytes!("../../../static/landing_page.js");
 static SETTINGS_PAGE_CSS: &[u8] = include_bytes!("../../../static/settings_page.css");
 static SERVICE_PAGE_CSS: &[u8] = include_bytes!("../../../static/service_page.css");
+static INTERNAL_ERROR_HTML: &[u8] = b"<html><body><h1>Internal Server Error</h1></body></html>";
 // static WASM_HELLO: &[u8] = include_bytes!("../wasm-hello/pkg/wasm_hello.js");
 // static WASM_HELLO_RUST: &[u8] = include_bytes!("../wasm-hello/pkg/wasm_hello_bg.wasm");
 
@@ -27,9 +28,6 @@ pub struct RequestLine {
 }
 
 impl RequestLine {
-    fn as_string(&self) -> String {
-        format!("{} {} {}", self.method, self.path, self.version)
-    }
 }
 
 pub fn handle_http_connection(mut stream: TcpStream) {
@@ -49,92 +47,87 @@ pub fn handle_http_connection(mut stream: TcpStream) {
         }
     };
     let config = &get_config();
-    let request_line = request_line.as_string();
-    let (status_line, contents, content_type, enable_cache): (&str, &[u8], &str, bool) = match &request_line[..] {
-        "GET / HTTP/1.1" => (
-            "HTTP/1.1 200 OK",
-            &get_landing_page(&config),
-            "text/html; charset=utf-8",
-            false,
-        ),
-        "GET /settings HTTP/1.1" => (
-            "HTTP/1.1 200 OK",
-            &get_settings_page(&config),
-            "text/html; charset=utf-8",
-            false,
-        ),
-        "GET /service HTTP/1.1" => (
-            "HTTP/1.1 200 OK",
-            &get_service_page(query_params, &config),
-            "text/html; charset=utf-8",
-            false,
-        ),
-        "GET /static/custom_htmx.js HTTP/1.1" => (
+    let method = request_line.method.as_str();
+    let path = request_line.path.as_str();
+    let (status_line, contents, content_type, enable_cache): (&str, &[u8], &str, bool) = match (method, path) {
+        ("GET", "/static/custom_htmx.js") => (
             "HTTP/1.1 200 OK",
             CUSTOM_HTMX_JS,
             "application/javascript; charset=utf-8",
             true,
         ),
-        "GET /static/landing_page.css HTTP/1.1" => (
+        ("GET", "/static/landing_page.css") => (
             "HTTP/1.1 200 OK",
             LANDING_PAGE_CSS,
             "text/css",
             true,
         ),
-        "GET /static/settings_page.css HTTP/1.1" => (
+        ("GET", "/static/landing_page.js") => (
+            "HTTP/1.1 200 OK",
+            LANDING_PAGE_JS,
+            "application/javascript; charset=utf-8",
+            true,
+        ),
+        ("GET", "/static/settings_page.css") => (
             "HTTP/1.1 200 OK",
             SETTINGS_PAGE_CSS,
             "text/css",
             true,
         ),
-        "GET /static/service_page.css HTTP/1.1" => (
+        ("GET", "/static/service_page.css") => (
             "HTTP/1.1 200 OK",
             SERVICE_PAGE_CSS,
             "text/css",
             true,
         ),
-        "GET /static/animation.css HTTP/1.1" => (
+        ("GET", "/static/animation.css") => (
             "HTTP/1.1 200 OK",
             ANIMATION_CSS,
             "text/css",
             true,
         ),
-        "GET /static/firetruck.svg HTTP/1.1" => (
+        ("GET", "/static/firetruck.svg") => (
             "HTTP/1.1 200 OK",
             FIRE_TRUCK_SVG,
             "image/svg+xml",
             true,
         ),
-        "GET /static/ambulance.svg HTTP/1.1" => (
+        ("GET", "/static/ambulance.svg") => (
             "HTTP/1.1 200 OK",
             AMBULANCE_TRUCK_SVG,
             "image/svg+xml",
             true,
         ),
-        "GET /static/police.svg HTTP/1.1" => (
+        ("GET", "/static/police.svg") => (
             "HTTP/1.1 200 OK",
             POLICE_SVG,
             "image/svg+xml",
             true,
         ),
-        // "GET /static/wasm_hello.js HTTP/1.1" => (
-        //     "HTTP/1.1 200 OK",
-        //     WASM_HELLO,
-        //     "application/javascript; charset=utf-8",
-        //     true,
-        // ),
-        // "GET /static/wasm_hello_bg.wasm HTTP/1.1" => (
-        //     "HTTP/1.1 200 OK",
-        //     WASM_HELLO_RUST,
-        //     "application/wasm",
-        //     true,
-        // ),
-        _ => (
-            "HTTP/1.1 404 NOT FOUND",
-            &get_not_found(),
-            "text/html; charset=utf-8",
-            true,
-        ),
+        _ => {
+            let ui_result = handle_nav(path, query_params, config, UiMode::FullPage);
+            match ui_result {
+                UiResult::FullHtml(html) => {
+                    write_response(&mut stream, "HTTP/1.1 200 OK", "text/html; charset=utf-8", false, &html);
+                    return;
+                }
+                UiResult::NotFound(html) => {
+                    write_response(&mut stream, "HTTP/1.1 404 NOT FOUND", "text/html; charset=utf-8", true, &html);
+                    return;
+                }
+                UiResult::Redirect(location) => {
+                    let headers = format!(
+                        "HTTP/1.1 302 FOUND\r\nLocation: {location}\r\nContent-Length: 0\r\n\r\n"
+                    );
+                    let _ = stream.write_all(&headers.into_bytes());
+                    return;
+                }
+                UiResult::Patch(_) => {
+                    write_response(&mut stream, "HTTP/1.1 500 INTERNAL SERVER ERROR", "text/html; charset=utf-8", false, INTERNAL_ERROR_HTML);
+                    return;
+                }
+            }
+        }
     };
 
     let headers = format!(
@@ -164,6 +157,23 @@ pub fn handle_http_connection(mut stream: TcpStream) {
     }
 }
 
+fn write_response(stream: &mut TcpStream, status_line: &str, content_type: &str, enable_cache: bool, contents: &[u8]) {
+    let headers = format!(
+        "{status_line}\r\nContent-Type: {content_type}\r\n{}Content-Length: {}\r\n\r\n",
+        if enable_cache { "Cache-Control: public, max-age=86400\r\n" } else { "" },
+        contents.len(),
+    );
+    if let Err(err) = stream.write_all(&headers.into_bytes()) {
+        let bt = Backtrace::capture();
+        eprintln!("error, when streaming headers to client. Error: {}. Stack: {:?}", err, bt);
+        return;
+    }
+    if let Err(err) = stream.write_all(contents) {
+        let bt = Backtrace::capture();
+        eprintln!("error, when streaming content to client. Error: {}. Stack: {:?}", err, bt);
+    }
+}
+
 fn parse_request_line(request_line: String) -> (RequestLine, HashMap<String, String>) {
     let mut parts = request_line.split_whitespace();
     let method = parts.next().unwrap_or_default().to_string();
@@ -182,22 +192,6 @@ fn parse_request_line(request_line: String) -> (RequestLine, HashMap<String, Str
     };
     let query_params = parse_query_params(query);
     (request_line, query_params)
-}
-
-fn parse_query_params(query: &str) -> HashMap<String, String> {
-    query
-        .split('&')
-        .filter(|pair| !pair.is_empty())
-        .filter_map(|pair| {
-            let mut parts = pair.splitn(2, '=');
-            let key = parts.next().unwrap_or_default();
-            if key.is_empty() {
-                return None;
-            }
-            let value = parts.next().unwrap_or_default();
-            Some((key.to_string(), value.to_string()))
-        })
-        .collect()
 }
 
 #[cfg(test)]
