@@ -185,16 +185,44 @@
       Object.freeze(window.WS);
   }
 
-  function applyPatch(html) {
-    const wrapper = document.createElement("div");
-    wrapper.innerHTML = html;
-    const next = wrapper.querySelector("#app");
+  const pendingPatches = [];
+
+  function flushPendingPatches() {
+    const htmx = window.customHtmx;
+    if (!htmx || pendingPatches.length === 0) return;
+    while (pendingPatches.length > 0) {
+      const html = pendingPatches.shift();
+      applyPatch(html, { allowQueue: false });
+    }
+  }
+
+  document.addEventListener("customhtmx:ready", flushPendingPatches);
+
+  function applyPatch(html, options = {}) {
+    const { allowQueue = true } = options;
     const current = document.getElementById("app");
+    const htmx = window.customHtmx;
+    if (!htmx && allowQueue) {
+console.log("todo remove JLoPJ ", htmx);
+console.log("todo remove iKuFZ ", allowQueue);
+      pendingPatches.push(html);
+      return;
+    }
+    const fragment = htmx ? htmx.parseFragment(html) : null;
+    const oobApplied = htmx ? htmx.applyOobSwaps(fragment) : 0;
+    const next = fragment ? fragment.querySelector("#app") : null;
+
     if (next && current) {
       current.replaceWith(next);
       syncPageAssets();
       return;
     }
+
+    if (oobApplied > 0) {
+      syncPageAssets();
+      return;
+    }
+
     if (current) {
       current.innerHTML = html;
     }
@@ -227,6 +255,7 @@
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(typeof payload === "string" ? payload : JSON.stringify(payload));
     } else {
+        // TODO could switch to http post here maybe for progressive enhancement
       log("send skipped; socket not open");
     }
   }

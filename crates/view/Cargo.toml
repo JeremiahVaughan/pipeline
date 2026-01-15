@@ -6,4 +6,4 @@ edition = "2024"
 [dependencies]
 model = { path = "../model" }
 config = { path = "../config" }
-hypertext = "0.12.1"
+hypertext = { version = "0.12.1", features = ["htmx"] }

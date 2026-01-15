@@ -3,7 +3,7 @@
 use config::AppConfig;
 use model::{ModelResult, SqliteUserModel, User};
 use std::collections::HashMap;
-use view::{get_landing_app, get_landing_app_with_services, get_landing_page, get_settings_app, get_settings_page, get_service_app, get_service_page, get_not_found, get_not_found_app};
+use view::{get_landing_app, get_landing_page, get_landing_services_oob, get_settings_app, get_settings_page, get_service_app, get_service_page, get_not_found, get_not_found_app};
 
 /// Coordinates model operations for the view layer.
 pub struct UserController {
@@ -52,7 +52,7 @@ pub fn parse_event(text: &str) -> Result<AppEvent, ParseEventError> {
             _ => Err(ParseEventError::MissingArg),
         },
         "search_services" => match rest {
-            Some(service) if !service.is_empty() => Ok(AppEvent::SearchServices(service.to_string())),
+            Some(service) => Ok(AppEvent::SearchServices(service.to_string())),
             _ => Err(ParseEventError::MissingArg),
         },
         "navigate" => match rest {
@@ -117,7 +117,7 @@ pub fn parse_query_params(query: &str) -> HashMap<String, String> {
 pub fn get_filtered_landing_app(query: &str, config: &AppConfig) -> String {
     let query = query.trim();
     if query.is_empty() {
-        return get_landing_app(config);
+        return get_landing_services_oob(config.services.keys().map(String::as_str));
     }
 
     let query_lower = query.to_lowercase();
@@ -134,10 +134,7 @@ pub fn get_filtered_landing_app(query: &str, config: &AppConfig) -> String {
         score_a.cmp(score_b).then_with(|| name_a.cmp(name_b))
     });
 
-    get_landing_app_with_services(
-        matches.into_iter().map(|(_, name)| name.as_str()),
-        Some(query),
-    )
+    get_landing_services_oob(matches.into_iter().map(|(_, name)| name.as_str()))
 }
 
 fn fuzzy_score(needle: &str, haystack: &str) -> Option<usize> {

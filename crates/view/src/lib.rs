@@ -1,7 +1,7 @@
 //! View helpers for rendering model data to text.
 
 pub mod landing_page;
-pub use landing_page::{get_landing_page, get_landing_app, get_landing_app_with_services};
+pub use landing_page::{get_landing_page, get_landing_app, get_landing_app_with_services, get_landing_services_oob};
 pub mod settings_page;
 pub use settings_page::{get_settings_page, get_settings_app};
 pub mod service_page;

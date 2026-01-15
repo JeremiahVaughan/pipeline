@@ -41,6 +41,26 @@ where
     .into_inner()
 }
 
+pub fn get_landing_services_oob<'a, I>(services: I) -> String
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let services: Vec<&'a str> = services.into_iter().collect();
+    maud! {
+        ul #messages hx-swap-oob="true" {
+            @for name in &services {
+                li.item {
+                    a.item-link href=(format!("/service?name={}", name)) {
+                        (name)
+                    }
+                }
+            }
+        }
+    }
+    .render()
+    .into_inner()
+}
+
 pub fn get_landing_page(config: &AppConfig) -> Vec<u8> {
     let app_html = get_landing_app(config);
     maud! {
