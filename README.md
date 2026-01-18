@@ -28,3 +28,29 @@ The sample output renders a single seeded user profile through the controller an
 
 - Edit `config/example.toml` to set application options such as `database_path`.
 - Configuration is loaded once at startup and exposed globally for convenience.
+
+### Custom htmx over websockets
+
+This app uses a small `custom_htmx.js` shim that mirrors the familiar htmx attributes, but all interactions travel over the websocket (`static/ws.js`).
+
+The main quirk is `hx-patch`: instead of issuing an HTTP request, its value becomes the first token in the websocket message. The rest of the message is built from the closest parent form's input fields, in DOM order, and each item is delimited by `:`.
+
+Example
+
+```html
+<form>
+  <input hx-patch="search_services" hx-trigger="input" />
+</form>
+```
+
+If the user types `fire`, the client sends:
+
+```
+search_services:fire
+```
+
+If the form has multiple inputs, each input value is appended in order:
+
+```
+search_services:first_value:second_value
+```

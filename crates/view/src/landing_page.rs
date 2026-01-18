@@ -22,7 +22,12 @@ where
 
             form #publish-form {
                 input #search
+                      hx-patch="search_services"
+                      hx-target="#messages"
+                      hx-trigger="input"
+                      hx-swap-oob="outerHTML"
                       type="text" 
+                      autofocus
                       value=(search_value)
                       placeholder="search...";
             }
