@@ -1,6 +1,5 @@
 target/
 **/*.rs.bk
 data/
-config.toml
 vendoring
 certs

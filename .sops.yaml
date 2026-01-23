@@ -1,0 +1,14 @@
+creation_rules:
+    - path_regex: .*/development/.*
+      age: >-
+        age1y675kxzf4kx094fumup4mmlzdw3h5es3t6a7d5wpsq5kzza5gvks3sxe7p,
+        age1ymumkgs22uz0qqexc7s49f2nlnyrn6pju53k3g0dydtdvfgltelqt6g8x9
+    - path_regex: .*/staging/.*
+      age: >-
+        age1jpxx62rsxczxapq6upyhm8wz05u2ys37euty9uhd8k4ryzsngv6s9uk73c,
+        age1999l65utz5p4r0pvt8fd6ucgpph5vcyn76jw929vqps85uv8p53shryjzv
+    - path_regex: .*/production/.*
+      age: >-
+        age1jpxx62rsxczxapq6upyhm8wz05u2ys37euty9uhd8k4ryzsngv6s9uk73c,
+        age1999l65utz5p4r0pvt8fd6ucgpph5vcyn76jw929vqps85uv8p53shryjzv
+
