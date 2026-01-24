@@ -1,5 +1,5 @@
-t:
-	cargo test
 
-b:
-	cargo run
+.PHONY: t
+t:
+	./deploy.sh && cargo test
+

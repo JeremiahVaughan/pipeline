@@ -39,7 +39,7 @@ prepare_user_files() {
             exit 1
         fi
 
-        if [[ "$file_path" == *.json && -f "$file_path" ]]; then
+        if [[ "$file_path" == *.toml && -f "$file_path" ]]; then
             if [[ -z "$DECRYPT_DIR" ]]; then
                 DECRYPT_DIR=$(mktemp -d "/tmp/${APP}_configs.XXXXXX")
             fi
@@ -69,7 +69,7 @@ build() {
         custom_build "$arch"
     else
         echo "Using default build for ${APP}"
-        GOOS=linux GOARCH="$arch" go build -o "/tmp/${APP}"
+        GOOS=linux GOARCH="$arch" cargo build --target-dir "/tmp/${APP}"
     fi
 }
 

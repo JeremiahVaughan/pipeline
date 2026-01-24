@@ -6,7 +6,7 @@ get_files() {
     local files=(
         "./static"
         "./crates/db/migrations"
-        "./config/${ENVIRONMENT}/config.json"
+        "./config/${ENVIRONMENT}/config.toml"
         "/tmp/${APP}"
         "./${APP}.service"
         "./remote-deploy.sh"
