@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/home/piegarden/deploy/pipeline/pipeline
+ExecStart=/home/piegarden/deploy/pipeline/app.new
 
 Restart=on-failure
 RestartSec=45

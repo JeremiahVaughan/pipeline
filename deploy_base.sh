@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 APP="${APP:?Must set APP}"
 ENVIRONMENT="${1:-development}"
@@ -17,49 +17,22 @@ case "$ENVIRONMENT" in
         ;;
 esac
 
-DECRYPT_DIR=""
 RESOLVED_FILES=()
 
 cleanup() {
-    if [[ -n "$DECRYPT_DIR" && -d "$DECRYPT_DIR" ]]; then
-        rm -rf "$DECRYPT_DIR"
-    fi
+    rm ./target/config.toml
 }
 trap cleanup EXIT
 
 prepare_user_files() {
-    RESOLVED_FILES=()
-    if [[ ${#USER_FILES[@]} -eq 0 ]]; then
-        return
-    fi
+    local decrypted_path="./target/config.toml"
+    sops -d "./config/${ENVIRONMENT}/config.toml" > "$decrypted_path"
 
-    for file_path in "${USER_FILES[@]}"; do
-        if [[ ! -e "$file_path" ]]; then
-            echo "error: file or directory '$file_path' from get_files does not exist" >&2
-            exit 1
-        fi
+cat <<EOF > ./target/deploy_file_list.txt
+${decrypted_path}
+EOF
 
-        if [[ "$file_path" == *.toml && -f "$file_path" ]]; then
-            if [[ -z "$DECRYPT_DIR" ]]; then
-                DECRYPT_DIR=$(mktemp -d "/tmp/${APP}_configs.XXXXXX")
-            fi
-
-            local base_name
-            base_name=$(basename "$file_path")
-            local decrypted_path="${DECRYPT_DIR}/${base_name}"
-            sops -d "$file_path" > "$decrypted_path"
-            RESOLVED_FILES+=("$decrypted_path")
-        else
-            RESOLVED_FILES+=("$file_path")
-        fi
-    done
 }
-
-USER_FILES=()
-if declare -f get_files >/dev/null 2>&1; then
-    USER_FILES=($(get_files))
-fi
-
 
 build() {
     local arch="$1"
@@ -69,7 +42,7 @@ build() {
         custom_build "$arch"
     else
         echo "Using default build for ${APP}"
-        GOOS=linux GOARCH="$arch" cargo build --target-dir "/tmp/${APP}"
+        GOOS=linux GOARCH="$arch" cargo build
     fi
 }
 
@@ -79,22 +52,31 @@ deploy_remote() {
 
     echo "remote deploy triggered for ${environment}"
     build "$arch"
-    prepare_user_files
-    rsync -avzh --delete -e ssh "${RESOLVED_FILES[@]}" "${environment}:${HOME}/deploy/${APP}"
+    rsync -arvzh --no-relative \
+        --delete --delete-missing-args \
+        --files-from="./target/deploy_file_list.txt" \
+        --filter='protect app.new' \
+        -e ssh \
+        ./ "${environment}:${HOME}/deploy/${APP}/"
     ssh "${environment}" "APP=$APP ${HOME}/deploy/${APP}/remote-deploy.sh"
 }
 
 deploy_local() {
+    # protecting the deployed binary since it remains running until we shutdown the server. Doing this keeps the server from crashing and reduces the apps downtime because we don't turn off the service until all the data is present on the target machine.
     local environment="$1"
     local arch="$2"
 
-    echo "local deploy triggered"
-    build "$arch"
-    prepare_user_files
-    rsync -avzh --delete "${RESOLVED_FILES[@]}" "${HOME}/deploy/${APP}"
+    echo "remote deploy triggered for ${environment}"
+    rsync -arvzh --no-relative \
+        --delete --delete-missing-args \
+        --files-from="./target/deploy_file_list.txt" \
+        --filter='protect app.new' \
+        ./ "${HOME}/deploy/${APP}/"
     APP="$APP" "${HOME}/deploy/${APP}/remote-deploy.sh"
 }
 
+prepare_user_files
+list_files
 if [[ "$ENVIRONMENT" == "development" ]]; then
     deploy_local "$ENVIRONMENT" "$BUILD_ARCH"
 else
